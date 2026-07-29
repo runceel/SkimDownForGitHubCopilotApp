@@ -1,0 +1,614 @@
+/* SkimDown — quiet reader styling.
+ * Light/Dark/System themes flip via the <body data-theme="..."> attribute.
+ * Custom user themes set both data-theme="custom" and data-theme-type="light|dark";
+ * custom CSS variables are then layered on top via inline style on documentElement. */
+
+:root {
+    color-scheme: light dark;
+    --skim-bg: #ffffff;
+    --skim-fg: #1f2328;
+    --skim-muted: #59636e;
+    --skim-border: #d0d7de;
+    --skim-soft: #f6f8fa;
+    --skim-soft-strong: #eaeef2;
+    --skim-link: #0969da;
+    --skim-mark-bg: #fff5b1;
+    --skim-mark-current-bg: #ffd33d;
+    --skim-blockquote: #59636e;
+    --skim-code-bg: #f6f8fa;
+    --skim-table-stripe: #f6f8fa;
+    --skim-content-max: 760px;
+    --skim-pad: clamp(16px, 4vw, 56px);
+}
+
+body[data-theme="dark"],
+body[data-theme="custom"][data-theme-type="dark"] {
+    color-scheme: dark;
+    --skim-bg: #0d1117;
+    --skim-fg: #e6edf3;
+    --skim-muted: #9198a1;
+    --skim-border: #30363d;
+    --skim-soft: #161b22;
+    --skim-soft-strong: #21262d;
+    --skim-link: #4493f8;
+    --skim-mark-bg: rgba(255, 212, 59, 0.4);
+    --skim-mark-current-bg: rgba(255, 212, 59, 0.8);
+    --skim-blockquote: #9198a1;
+    --skim-code-bg: #161b22;
+    --skim-table-stripe: #161b22;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    /* Ensure the themed background covers the entire viewport even when the
+       content is shorter than the window (otherwise the WebView2 default
+       white background shows below the content in dark mode). */
+    min-height: 100vh;
+    background: var(--skim-bg);
+    color: var(--skim-fg);
+    font-family: -apple-system, "Segoe UI", "Segoe UI Variable", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+main.markdown-body {
+    box-sizing: border-box;
+    max-width: var(--skim-content-max);
+    margin: 0 auto;
+    padding: var(--skim-pad) var(--skim-pad) 96px;
+    text-align: left;
+    overflow-wrap: break-word;
+}
+
+main.markdown-body > *:first-child { margin-top: 0; }
+
+main.markdown-body h1, main.markdown-body h2 {
+    border-bottom: 1px solid var(--skim-border);
+    padding-bottom: 0.3em;
+    margin-top: 1.8em;
+    margin-bottom: 0.8em;
+}
+main.markdown-body h1 { font-size: 2em; }
+main.markdown-body h2 { font-size: 1.5em; }
+main.markdown-body h3 { font-size: 1.25em; margin-top: 1.6em; }
+main.markdown-body h4 { font-size: 1em; margin-top: 1.4em; }
+main.markdown-body h5 { font-size: 0.9em; }
+main.markdown-body h6 { font-size: 0.85em; color: var(--skim-muted); }
+
+main.markdown-body a { color: var(--skim-link); text-decoration: none; }
+main.markdown-body a:hover { text-decoration: underline; }
+
+main.markdown-body p, main.markdown-body ul, main.markdown-body ol, main.markdown-body blockquote {
+    margin: 0 0 1em;
+}
+
+main.markdown-body blockquote {
+    border-left: 4px solid var(--skim-border);
+    padding: 0 1em;
+    color: var(--skim-blockquote);
+}
+
+main.markdown-body hr {
+    border: 0;
+    border-top: 1px solid var(--skim-border);
+    margin: 2em 0;
+}
+
+main.markdown-body code {
+    background: var(--skim-code-bg);
+    padding: 0.2em 0.4em;
+    border-radius: 6px;
+    font-family: "Cascadia Mono", Consolas, "SF Mono", Menlo, "DejaVu Sans Mono", monospace;
+    font-size: 0.9em;
+}
+
+main.markdown-body pre {
+    background: var(--skim-code-bg);
+    padding: 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    line-height: 1.5;
+}
+
+main.markdown-body pre code {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ----- Code-block wrapper (language label + copy button, upper-right) ----- */
+
+main.markdown-body .skim-code {
+    position: relative;
+    margin: 0 0 1em;
+}
+
+main.markdown-body .skim-code > pre {
+    margin: 0;
+    padding-right: 64px; /* leave room for the absolute-positioned controls */
+}
+
+main.markdown-body .skim-code-lang {
+    position: absolute;
+    top: 6px;
+    right: 56px;
+    font-size: 12px;
+    line-height: 1;
+    opacity: 0.6;
+    user-select: none;
+    pointer-events: none;
+    color: var(--skim-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    font-family: "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+}
+
+main.markdown-body .skim-code-copy {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--skim-muted);
+    font: inherit;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0;
+    user-select: none;
+    transition: opacity 120ms ease-in-out, background 120ms ease-in-out;
+}
+
+main.markdown-body .skim-code:hover .skim-code-copy,
+main.markdown-body .skim-code:focus-within .skim-code-copy {
+    opacity: 0.85;
+}
+
+main.markdown-body .skim-code-copy:hover {
+    background: var(--skim-soft-strong);
+    border-color: var(--skim-border);
+    opacity: 1;
+}
+
+main.markdown-body .skim-code-copy.copied {
+    opacity: 1;
+    background: var(--skim-soft-strong);
+    border-color: var(--skim-border);
+    color: var(--skim-link);
+}
+
+main.markdown-body .skim-code-copy .skim-code-copy-label {
+    pointer-events: none;
+}
+
+/* ----- Mermaid diagram container ----- */
+/* The outer .skim-mermaid-wrap is a non-scrolling positioning host so the
+   "click to enlarge" badge can stay pinned to the visible top-right corner
+   regardless of diagram width. The inner .skim-mermaid-scroll owns the
+   horizontal scrolling. */
+
+main.markdown-body .skim-mermaid-wrap {
+    position: relative;
+    margin: 1em auto;
+    cursor: zoom-in;
+    /* Fit the wrap (and therefore the scroll card and the zoom-hint
+       badge) to the diagram's intrinsic width so a narrow TD diagram
+       sits in a card hugged to its content instead of stretching a
+       full-width card around a thin diagram. `max-width: 100%` keeps
+       wide diagrams (e.g., long LR flows) constrained to the markdown
+       body's content area; the inner `.skim-mermaid-scroll` (with
+       `overflow-x: auto`) then provides horizontal scrolling for the
+       overflowing SVG. `margin: 1em auto` centers the wrap within the
+       markdown body. Combined with the `.skim-mermaid-wrap svg` rule
+       below (`display: block; margin: 0 auto`), this gives:
+         - narrow diagram: card hugs the SVG and is centered in body
+         - wide diagram:   card spans the body width, SVG scrolls inside */
+    width: fit-content;
+    max-width: 100%;
+}
+
+main.markdown-body .skim-mermaid-scroll {
+    padding: 16px;
+    background: var(--skim-soft);
+    border: 1px solid var(--skim-border);
+    border-radius: 8px;
+    overflow-x: auto;
+    text-align: center;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+main.markdown-body .skim-mermaid-wrap:hover .skim-mermaid-scroll {
+    border-color: var(--skim-link);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+main.markdown-body .skim-mermaid-wrap pre.mermaid {
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    overflow: visible;
+    text-align: left;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    color: var(--skim-fg);
+}
+
+/* Render Mermaid SVG at its intrinsic (1:1) size — do NOT cap with
+   `max-width: 100%`. Capping shrinks the whole SVG when the wrap is
+   narrower than the diagram, and SVG content (including in-diagram
+   text driven by `themeVariables.fontSize = bodyStyle.fontSize`)
+   scales together with the SVG box. The intent is to keep Mermaid
+   labels visually the same size as surrounding prose, mirroring
+   upstream macOS SkimDown (07JP27/SkimDown). When the diagram is
+   wider than the wrap, the parent `.skim-mermaid-scroll
+   { overflow-x: auto }` handles horizontal scrolling.
+
+   `display: block` + `margin-left/right: auto` centers narrow
+   diagrams inside the scroll container without relying on
+   `text-align: center` (which would clip the left edge of wider
+   SVGs in some browsers — the centered overflow extends past the
+   left scroll origin). */
+main.markdown-body .skim-mermaid-wrap svg {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    height: auto;
+}
+
+/* Hover hint badge on the top-right of each Mermaid diagram. */
+main.markdown-body .skim-mermaid-zoom-hint {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    font-size: 11px;
+    color: var(--skim-link);
+    background: var(--skim-bg);
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--skim-border);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+    z-index: 1;
+    white-space: nowrap;
+    font-family: inherit;
+}
+
+main.markdown-body .skim-mermaid-wrap:hover .skim-mermaid-zoom-hint,
+main.markdown-body .skim-mermaid-wrap:focus-within .skim-mermaid-zoom-hint {
+    opacity: 1;
+}
+
+/* ----- Mermaid zoom modal ----- */
+/* Appended to <body> (not inside #skim-zoom-root) so the document-level CSS
+   `zoom` does NOT scale the modal. Theme variables on <body> still cascade. */
+
+.skim-zoom-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 40px;
+    box-sizing: border-box;
+}
+
+.skim-zoom-modal.open {
+    display: flex;
+}
+
+.skim-zoom-stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--skim-bg);
+    color: var(--skim-fg);
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    cursor: grab;
+    /* Prevent browser default touch gestures (scroll, pinch-zoom) from
+       interfering with our pointer-event-driven pan / pinch. */
+    touch-action: none;
+    -ms-touch-action: none;
+    user-select: none;
+}
+
+.skim-zoom-stage.dragging {
+    cursor: grabbing;
+}
+
+.skim-zoom-content {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(1);
+    transform-origin: center center;
+    transition: transform 0.05s linear;
+    user-select: none;
+    display: inline-block;
+    line-height: 0;
+    pointer-events: none;
+}
+
+.skim-zoom-content svg {
+    display: block;
+    max-width: none !important;
+    max-height: none !important;
+    pointer-events: auto;
+}
+
+.skim-zoom-toolbar {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 6px;
+    background: var(--skim-bg);
+    padding: 6px;
+    border-radius: 8px;
+    border: 1px solid var(--skim-border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 10;
+}
+
+.skim-zoom-toolbar button {
+    background: var(--skim-bg);
+    border: 1px solid var(--skim-border);
+    color: var(--skim-fg);
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    font-family: inherit;
+}
+
+.skim-zoom-toolbar button:hover {
+    background: var(--skim-soft);
+    border-color: var(--skim-link);
+}
+
+.skim-zoom-toolbar button:focus-visible {
+    outline: 2px solid var(--skim-link);
+    outline-offset: 1px;
+}
+
+.skim-zoom-toolbar .skim-zoom-info {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    color: var(--skim-muted);
+    font-size: 12px;
+    min-width: 56px;
+    justify-content: center;
+    font-family: inherit;
+}
+
+.skim-zoom-hint {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.7);
+    color: #ffffff;
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 14px;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* ----- KaTeX math styling (light/dark inherits via currentColor) ----- */
+
+main.markdown-body .katex-display {
+    margin: 1em 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25em 0;
+}
+
+main.markdown-body .katex { color: inherit; }
+
+main.markdown-body .skim-math-error {
+    font-family: "Cascadia Mono", Consolas, monospace;
+    color: var(--skim-muted);
+    background: var(--skim-soft);
+    padding: 0 4px;
+    border-radius: 4px;
+}
+
+/* ----- GitHub Alerts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING], > [!CAUTION]) ----- */
+
+main.markdown-body .skim-alert {
+    border-left-width: 4px;
+    border-left-style: solid;
+    padding: 12px 16px;
+    margin: 1em 0;
+    border-radius: 6px;
+    color: inherit;
+}
+
+/* The plain blockquote styling re-applies its own border which we override above. */
+main.markdown-body blockquote.skim-alert {
+    padding-left: 16px;
+}
+
+main.markdown-body .skim-alert > *:first-child { margin-top: 0; }
+main.markdown-body .skim-alert > *:last-child  { margin-bottom: 0; }
+
+main.markdown-body .skim-alert-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 0.95em;
+    user-select: none;
+}
+
+main.markdown-body .skim-alert-icon {
+    font-size: 1.1em;
+    line-height: 1;
+}
+
+main.markdown-body .skim-alert-note      { border-left-color: #1f6feb; background: rgba(31, 111, 235, 0.08); }
+main.markdown-body .skim-alert-note      .skim-alert-label { color: #1f6feb; }
+main.markdown-body .skim-alert-tip       { border-left-color: #1a7f37; background: rgba(26, 127, 55, 0.08); }
+main.markdown-body .skim-alert-tip       .skim-alert-label { color: #1a7f37; }
+main.markdown-body .skim-alert-important { border-left-color: #8250df; background: rgba(130, 80, 223, 0.08); }
+main.markdown-body .skim-alert-important .skim-alert-label { color: #8250df; }
+main.markdown-body .skim-alert-warning   { border-left-color: #bf8700; background: rgba(191, 135, 0, 0.10); }
+main.markdown-body .skim-alert-warning   .skim-alert-label { color: #bf8700; }
+main.markdown-body .skim-alert-caution   { border-left-color: #cf222e; background: rgba(207, 34, 46, 0.08); }
+main.markdown-body .skim-alert-caution   .skim-alert-label { color: #cf222e; }
+
+body[data-theme="dark"] main.markdown-body .skim-alert-note,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-note      { border-left-color: #4493f8; background: rgba(56, 139, 253, 0.12); }
+body[data-theme="dark"] main.markdown-body .skim-alert-note      .skim-alert-label,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-note      .skim-alert-label { color: #4493f8; }
+body[data-theme="dark"] main.markdown-body .skim-alert-tip,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-tip       { border-left-color: #3fb950; background: rgba(63, 185, 80, 0.12); }
+body[data-theme="dark"] main.markdown-body .skim-alert-tip       .skim-alert-label,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-tip       .skim-alert-label { color: #3fb950; }
+body[data-theme="dark"] main.markdown-body .skim-alert-important,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-important { border-left-color: #ab7df8; background: rgba(171, 125, 248, 0.12); }
+body[data-theme="dark"] main.markdown-body .skim-alert-important .skim-alert-label,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-important .skim-alert-label { color: #ab7df8; }
+body[data-theme="dark"] main.markdown-body .skim-alert-warning,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-warning   { border-left-color: #d29922; background: rgba(210, 153, 34, 0.14); }
+body[data-theme="dark"] main.markdown-body .skim-alert-warning   .skim-alert-label,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-warning   .skim-alert-label { color: #d29922; }
+body[data-theme="dark"] main.markdown-body .skim-alert-caution,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-caution   { border-left-color: #f85149; background: rgba(248, 81, 73, 0.12); }
+body[data-theme="dark"] main.markdown-body .skim-alert-caution   .skim-alert-label,
+body[data-theme="custom"][data-theme-type="dark"] main.markdown-body .skim-alert-caution   .skim-alert-label { color: #f85149; }
+
+/* ----- Inline color swatches after #rgb / #rrggbb / #rrggbbaa hex literals ----- */
+
+main.markdown-body .skim-color-swatch {
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    margin: 0 0.15em 0 0.3em;
+    border-radius: 3px;
+    border: 1px solid var(--skim-border);
+    vertical-align: -0.12em;
+    box-sizing: border-box;
+}
+
+main.markdown-body img {
+    max-width: 100%;
+    height: auto;
+}
+
+main.markdown-body table {
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+    margin: 1em 0;
+}
+
+main.markdown-body table th, main.markdown-body table td {
+    border: 1px solid var(--skim-border);
+    padding: 6px 13px;
+}
+
+main.markdown-body table tr:nth-child(2n) {
+    background: var(--skim-table-stripe);
+}
+
+main.markdown-body ul.contains-task-list { padding-left: 1.5em; list-style: none; }
+main.markdown-body li.task-list-item { list-style: none; }
+/* Custom-render the task-list checkbox instead of relying on the browser's
+   native disabled-checkbox look. Chromium / WebView2 draws disabled native
+   checkboxes as a heavy dark-filled square whenever the OS color-scheme is
+   dark — which made checked/unchecked items look like indistinguishable
+   black blocks on the light (Mica-tinted) background. The custom appearance
+   below is theme-aware (uses --skim-bg / --skim-border / --skim-link) so it
+   stays legible in both light and dark themes regardless of OS theme. */
+main.markdown-body li.task-list-item > input[type="checkbox"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin: 0 0.45em 0 -1.35em;
+    padding: 0;
+    vertical-align: -2px;
+    cursor: default;
+    box-sizing: border-box;
+    background-color: var(--skim-bg);
+    border: 1px solid var(--skim-border);
+    border-radius: 3px;
+    position: relative;
+    opacity: 1;
+    flex-shrink: 0;
+}
+main.markdown-body li.task-list-item > input[type="checkbox"]:checked {
+    background-color: var(--skim-link);
+    border-color: var(--skim-link);
+}
+main.markdown-body li.task-list-item > input[type="checkbox"]:checked::after {
+    content: "";
+    position: absolute;
+    left: 3.5px;
+    top: 0.5px;
+    width: 3px;
+    height: 7px;
+    border: solid #ffffff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+    box-sizing: content-box;
+}
+main.markdown-body li.task-list-item > p:first-child {
+    display: inline;
+    margin: 0;
+}
+
+/* Display math from ```math fenced blocks; sits flush with body width. */
+main.markdown-body .skim-math-block {
+    margin: 1em 0;
+    text-align: center;
+    overflow-x: auto;
+}
+main.markdown-body .skim-math-block .katex-display { margin: 0; }
+
+mark.skim-search-hit {
+    background: var(--skim-mark-bg);
+    color: inherit;
+    border-radius: 2px;
+}
+
+mark.skim-search-hit.current {
+    background: var(--skim-mark-current-bg);
+    outline: 2px solid var(--skim-link);
+}
+
+.skim-empty {
+    color: var(--skim-muted);
+    font-style: italic;
+    text-align: center;
+    margin-top: 4em;
+}
+
+.skim-error {
+    color: #cf222e;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    white-space: pre-wrap;
+    background: var(--skim-soft);
+    border: 1px solid var(--skim-border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 2em 0;
+}
