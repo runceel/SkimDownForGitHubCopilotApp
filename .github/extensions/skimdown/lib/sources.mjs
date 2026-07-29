@@ -206,13 +206,18 @@ function stripBom(text) {
 
 /**
  * Classify a user/agent supplied path so `open_path` can pick folder vs file
- * mode without the caller having to know.
+ * mode without the caller having to know. Relative paths resolve against
+ * `baseDir` (the workspace root) rather than the extension host's cwd, which
+ * is `$COPILOT_HOME` and never what the caller meant.
  */
-export async function classifyPath(target) {
+export async function classifyPath(target, baseDir) {
     if (typeof target !== "string" || target.trim().length === 0) {
         return { kind: "invalid", reason: "パスが空です" };
     }
-    const resolved = path.resolve(target.trim());
+    const trimmed = target.trim();
+    const resolved = path.isAbsolute(trimmed)
+        ? path.resolve(trimmed)
+        : path.resolve(baseDir || process.cwd(), trimmed);
     const meta = await statSafe(resolved);
     if (!meta) return { kind: "missing", path: resolved };
     if (meta.isDirectory()) return { kind: "folder", path: resolved };

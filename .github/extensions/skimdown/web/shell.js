@@ -54,6 +54,7 @@
         btnPathCancel: document.getElementById("btn-path-cancel"),
         linkbar: document.getElementById("linkbar"),
         deadbar: document.getElementById("deadbar"),
+        deadbarText: document.getElementById("deadbar-text"),
         btnDeadReload: document.getElementById("btn-dead-reload"),
         linkText: document.getElementById("link-text"),
         btnLinkOpen: document.getElementById("btn-link-open"),
@@ -102,11 +103,88 @@
         handleRendererMessage(ev.data.payload);
     });
 
+    /**
+     * The renderer announces itself with a `ready` post once `renderer.js` has
+     * booted. Everything the shell sends is queued until then, so a lost or
+     * never-sent `ready` leaves the preview permanently blank. That has to be
+     * survivable: watch the handshake, reload the frame once, and only then
+     * give up with a visible, actionable message.
+     */
+    var HANDSHAKE_GRACE_MS = 6000;
+    var handshakeTimer = 0;
+    var handshakeRetried = false;
+
+    function describeRenderer() {
+        var info = { retried: handshakeRetried };
+        try {
+            info.href = el.preview.contentWindow ? el.preview.contentWindow.location.href : null;
+        } catch (e) {
+            info.href = "blocked:" + e.name;
+        }
+        try {
+            var doc = el.preview.contentDocument;
+            info.readyState = doc ? doc.readyState : null;
+            info.bodyChildren = doc && doc.body ? doc.body.children.length : null;
+            info.hasBridge = !!(el.preview.contentWindow && el.preview.contentWindow.chrome
+                && el.preview.contentWindow.chrome.webview);
+        } catch (e) {
+            info.docError = e.name;
+        }
+        return info;
+    }
+
+    function reportDiag(reason) {
+        var payload = describeRenderer();
+        payload.reason = reason;
+        payload.shellOrigin = window.location.origin;
+        payload.nested = window.parent !== window;
+        // Best effort: diagnostics must never break the shell.
+        api("/api/diag", payload).catch(noop);
+    }
+
+    function watchHandshake() {
+        if (handshakeTimer) clearTimeout(handshakeTimer);
+        handshakeTimer = setTimeout(function () {
+            if (state.rendererReady) return;
+            if (!handshakeRetried) {
+                handshakeRetried = true;
+                reportDiag("handshake-timeout-retrying");
+                // Force a fresh renderer document; `ready` may simply have been
+                // emitted before this shell attached its message listener.
+                el.preview.src = el.preview.getAttribute("src");
+                watchHandshake();
+                return;
+            }
+            reportDiag("handshake-failed");
+            showDeadBar(true, "プレビューを初期化できませんでした。");
+        }, HANDSHAKE_GRACE_MS);
+    }
+
+    el.preview.addEventListener("load", function () {
+        if (state.rendererReady) return;
+        // The frame document exists now, so the bridge is installed and it is
+        // safe to prompt: if `ready` was missed, this re-triggers it.
+        postDirect({ type: "hello" });
+        watchHandshake();
+    });
+
+    /** Post without the ready gate — used to re-drive the handshake itself. */
+    function postDirect(message) {
+        var frame = el.preview.contentWindow;
+        if (!frame) return;
+        frame.postMessage({ __skim: true, payload: message }, window.location.origin);
+    }
+
     function handleRendererMessage(msg) {
         if (!msg || typeof msg !== "object") return;
         switch (msg.type) {
             case "ready":
                 state.rendererReady = true;
+                if (handshakeTimer) {
+                    clearTimeout(handshakeTimer);
+                    handshakeTimer = 0;
+                }
+                showDeadBar(false);
                 pushThemeToRenderer();
                 pushSettingsToRenderer();
                 flushRendererQueue();
@@ -163,13 +241,51 @@
 
     var SENTINEL = "rgb(1, 2, 3)";
 
-    function resolveColor(value) {
-        if (typeof value !== "string" || value.trim().length === 0) return null;
+    // Colors are normalised through a 1x1 canvas rather than a regex. The app
+    // theme is free to use any CSS color syntax (`oklch()`, `color-mix()`,
+    // `lab()`, …), and `getComputedStyle` preserves those spaces instead of
+    // converting to `rgb()`. Parsing the text therefore fails for perfectly
+    // valid colors — and because CSS itself resolves them, the shell chrome
+    // looks right while the renderer silently falls back to a wrong theme.
+    var normCanvas = document.createElement("canvas");
+    normCanvas.width = 1;
+    normCanvas.height = 1;
+    var normCtx = normCanvas.getContext("2d", { willReadFrequently: true });
+
+    function toRgb(cssText) {
+        if (typeof cssText !== "string" || cssText.trim().length === 0) return null;
+        if (!normCtx) return parseColor(cssText);
+        try {
+            normCtx.globalCompositeOperation = "copy";
+            // Two probes: an invalid value leaves `fillStyle` untouched, so a
+            // color that matches both sentinels cannot be trusted.
+            normCtx.fillStyle = "#000000";
+            normCtx.fillStyle = cssText;
+            var first = normCtx.fillStyle;
+            normCtx.fillStyle = "#ffffff";
+            normCtx.fillStyle = cssText;
+            if (normCtx.fillStyle !== first) return null;
+
+            normCtx.fillRect(0, 0, 1, 1);
+            var d = normCtx.getImageData(0, 0, 1, 1).data;
+            return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+        } catch (e) {
+            return parseColor(cssText);
+        }
+    }
+
+    /**
+     * Resolve an app theme token to concrete RGB. The `var()` indirection is
+     * evaluated by CSS (so a missing token falls back automatically) and the
+     * result is normalised through the canvas, which understands every color
+     * syntax the browser does.
+     */
+    function readResolved(name, fallbackCss) {
         colorProbe.style.color = SENTINEL;
-        colorProbe.style.color = value.trim();
+        colorProbe.style.color = "var(" + name + ", " + fallbackCss + ")";
         var computed = window.getComputedStyle(colorProbe).color;
-        if (!computed || computed === SENTINEL) return null;
-        return parseColor(computed);
+        if (!computed || computed === SENTINEL) return toRgb(fallbackCss);
+        return toRgb(computed) || toRgb(fallbackCss);
     }
 
     function parseColor(text) {
@@ -225,18 +341,30 @@
         return "rgb(" + Math.round(color.r) + ", " + Math.round(color.g) + ", " + Math.round(color.b) + ")";
     }
 
-    function isDarkTone() {
+    function readAttr(name) {
         var root = document.documentElement;
-        var tone = root.getAttribute("data-theme-tone") || root.getAttribute("data-color-mode") || "";
-        if (tone.indexOf("dark") >= 0) return true;
-        if (tone.indexOf("light") >= 0) return false;
-        // No usable attribute: fall back to the luminance of the page background.
-        var bg = resolveColor(readToken("--background-color-default")) || hexColor("#ffffff");
-        return (0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b) < 128;
+        var body = document.body;
+        return (
+            (root && root.getAttribute(name)) ||
+            (body && body.getAttribute(name)) ||
+            ""
+        );
     }
 
-    function readToken(name) {
-        return window.getComputedStyle(document.documentElement).getPropertyValue(name);
+    function luminance(color) {
+        return 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+    }
+
+    function isDarkTone() {
+        // The host may set these on either the root element or the body.
+        var tone = readAttr("data-theme-tone") || readAttr("data-color-mode");
+        if (tone.indexOf("dark") >= 0) return true;
+        if (tone.indexOf("light") >= 0) return false;
+        // No usable attribute: fall back to the luminance of what the shell is
+        // actually painted with, which the browser has already resolved.
+        var painted = toRgb(window.getComputedStyle(document.body).backgroundColor);
+        var bg = painted && painted.a > 0 ? painted : readResolved("--background-color-default", "#ffffff");
+        return luminance(bg) < 128;
     }
 
     function buildThemeMessage() {
@@ -245,21 +373,25 @@
             ? { bg: "#0d1117", fg: "#e6edf3", link: "#4493f8" }
             : { bg: "#ffffff", fg: "#1f2328", link: "#0969da" };
 
-        var bg = resolveColor(readToken("--background-color-default"));
-        bg = bg ? flatten(bg, hexColor(defaults.bg)) : hexColor(defaults.bg);
+        // `readResolved` lets CSS apply the fallback when a token is missing and
+        // normalises whatever color syntax the theme uses, so every value below
+        // is guaranteed usable — no null handling, and no silent collapse onto
+        // the background that would render the text invisible.
+        var bg = flatten(readResolved("--background-color-default", defaults.bg), hexColor(defaults.bg));
+        var fg = flatten(readResolved("--text-color-default", defaults.fg), bg);
+        var muted = flatten(readResolved("--text-color-muted", toCss(mix(fg, bg, 0.65))), bg);
+        var border = flatten(readResolved("--border-color-default", toCss(mix(fg, bg, 0.2))), bg);
+        var link = flatten(readResolved("--true-color-blue", defaults.link), bg);
 
-        // `flatten` returns the backdrop for a null color, so each token has to
-        // be resolved first — otherwise a missing token silently collapses onto
-        // the background and the text becomes invisible.
-        function token(name, fallback) {
-            var color = resolveColor(readToken(name));
-            return color ? flatten(color, bg) : fallback;
+        // A theme that resolves foreground and background to the same color
+        // would render the document invisible; prefer the known-good defaults.
+        if (Math.abs(luminance(fg) - luminance(bg)) < 24) {
+            bg = hexColor(defaults.bg);
+            fg = hexColor(defaults.fg);
+            muted = mix(fg, bg, 0.65);
+            border = mix(fg, bg, 0.2);
+            link = hexColor(defaults.link);
         }
-
-        var fg = token("--text-color-default", hexColor(defaults.fg));
-        var muted = token("--text-color-muted", mix(fg, bg, 0.65));
-        var border = token("--border-color-default", mix(fg, bg, 0.2));
-        var link = token("--true-color-blue", hexColor(defaults.link));
 
         return {
             theme: "custom",
@@ -1149,7 +1281,14 @@
         }, 2600);
     }
 
-    function showDeadBar(show) {
+    /** The bar is shared by the dead-server and dead-renderer paths, so the
+     *  markup's own copy has to be restored whenever no message is supplied. */
+    var deadbarDefaultText = el.deadbarText ? el.deadbarText.textContent : "";
+
+    function showDeadBar(show, message) {
+        if (show && el.deadbarText) {
+            el.deadbarText.textContent = message || deadbarDefaultText;
+        }
         el.deadbar.hidden = !show;
     }
 

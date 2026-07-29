@@ -288,7 +288,7 @@ export async function createInstance(ctx) {
     }
 
     async function openTarget(target) {
-        const classified = await classifyPath(target);
+        const classified = await classifyPath(target, state.workspacePath);
         if (classified.kind === "folder") {
             state.source = SOURCE_PATH;
             state.root = classified.path;
@@ -458,6 +458,15 @@ export async function createInstance(ctx) {
             }
             case "/api/link": {
                 return sendJson(res, 200, await resolveLink(String(body.href || "")));
+            }
+            case "/api/diag": {
+                // The renderer runs in a nested iframe we cannot inspect from
+                // the extension process, so it reports handshake failures here.
+                ctx.log?.(
+                    `renderer diagnostic (${state.instanceId}): ${JSON.stringify(body).slice(0, 900)}`,
+                    { level: "warning" },
+                );
+                return sendJson(res, 200, { ok: true });
             }
             case "/api/open-external": {
                 const opened = openExternal(String(body.href || ""));

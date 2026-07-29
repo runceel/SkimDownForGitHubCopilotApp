@@ -21,6 +21,10 @@
 
     var listeners = [];
     var SHELL_ORIGIN = window.location.origin;
+    // renderer.js announces itself exactly once. If the shell was not listening
+    // yet (or the message was lost) the preview would stay blank forever, so
+    // remember that it happened and replay it when the shell says `hello`.
+    var lastReady = null;
 
     window.addEventListener("message", function (ev) {
         if (ev.source !== window.parent) return;
@@ -29,6 +33,14 @@
         if (!envelope || typeof envelope !== "object" || envelope.__skim !== true) return;
 
         var payload = envelope.payload;
+
+        // `hello` is a shell-only handshake probe; renderer.js knows nothing
+        // about it, so answer here instead of forwarding.
+        if (payload && payload.type === "hello") {
+            if (lastReady) post(lastReady);
+            return;
+        }
+
         // Deliver a WebView2-shaped event object. renderer.js only reads `.data`.
         var synthetic = { data: payload };
         for (var i = 0; i < listeners.length; i++) {
@@ -41,14 +53,19 @@
         }
     });
 
+    function post(payload) {
+        try {
+            window.parent.postMessage({ __skim: true, payload: payload }, SHELL_ORIGIN);
+        } catch (e) {
+            console.warn("skimdown bridge post failed", e);
+        }
+    }
+
     window.chrome = window.chrome || {};
     window.chrome.webview = {
         postMessage: function (payload) {
-            try {
-                window.parent.postMessage({ __skim: true, payload: payload }, SHELL_ORIGIN);
-            } catch (e) {
-                console.warn("skimdown bridge post failed", e);
-            }
+            if (payload && payload.type === "ready") lastReady = payload;
+            post(payload);
         },
         addEventListener: function (type, callback) {
             if (type !== "message" || typeof callback !== "function") return;
