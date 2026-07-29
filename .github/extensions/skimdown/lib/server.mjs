@@ -33,7 +33,7 @@ import {
     rememberSelection,
     registryEvents,
 } from "./sessionDocs.mjs";
-import { sessionArtifactsDir, resolveWorkspaceRoot } from "./paths.mjs";
+import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag, diagFile } from "./paths.mjs";
 import { createWatcher } from "./watcher.mjs";
 import { isMarkdownFile } from "./scanner.mjs";
 
@@ -461,12 +461,19 @@ export async function createInstance(ctx) {
             }
             case "/api/diag": {
                 // The renderer runs in a nested iframe we cannot inspect from
-                // the extension process, so it reports handshake failures here.
+                // the extension process, so it reports failures here. The
+                // extension log channel is ephemeral, so persist it too —
+                // otherwise the evidence is gone before anyone can read it.
+                await appendDiag({
+                    at: new Date().toISOString(),
+                    instanceId: state.instanceId,
+                    ...body,
+                });
                 ctx.log?.(
                     `renderer diagnostic (${state.instanceId}): ${JSON.stringify(body).slice(0, 900)}`,
                     { level: "warning" },
                 );
-                return sendJson(res, 200, { ok: true });
+                return sendJson(res, 200, { ok: true, file: diagFile() });
             }
             case "/api/open-external": {
                 const opened = openExternal(String(body.href || ""));

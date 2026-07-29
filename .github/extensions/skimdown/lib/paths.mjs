@@ -27,6 +27,25 @@ export function settingsFile() {
     return path.join(artifactsDir(), "settings.json");
 }
 
+/* Append-only renderer diagnostics.
+ *
+ * The preview runs in a nested iframe the extension process cannot inspect, so
+ * when its boot fails the only evidence is what the page itself reports. Debug
+ * logging goes to an ephemeral channel that is gone by the time anyone looks,
+ * hence a file. */
+export function diagFile() {
+    return path.join(artifactsDir(), "diag.jsonl");
+}
+
+export async function appendDiag(entry) {
+    try {
+        await ensureDir(artifactsDir());
+        await fs.appendFile(diagFile(), JSON.stringify(entry) + "\n", "utf8");
+    } catch {
+        // Diagnostics must never take the canvas down.
+    }
+}
+
 export function sessionStateFile(sessionId) {
     return path.join(artifactsDir(), "sessions", `${sanitizeId(sessionId)}.json`);
 }
