@@ -36,6 +36,7 @@
         btnPrivacy: document.getElementById("btn-privacy"),
         btnSwapSidebar: document.getElementById("btn-swap-sidebar"),
         btnToggleSidebar: document.getElementById("btn-toggle-sidebar"),
+        btnToggleToc: document.getElementById("btn-toggle-toc"),
         docTitle: document.getElementById("doc-title"),
         docSubtitle: document.getElementById("doc-subtitle"),
         btnOpenBrowser: document.getElementById("btn-open-browser"),
@@ -66,7 +67,13 @@
         btnLinkOpen: document.getElementById("btn-link-open"),
         btnLinkCancel: document.getElementById("btn-link-cancel"),
         preview: document.getElementById("preview"),
+        previewWrap: document.getElementById("preview-wrap"),
         emptyState: document.getElementById("empty-state"),
+        tocPane: document.getElementById("toc-pane"),
+        tocList: document.getElementById("toc-list"),
+        tocEmpty: document.getElementById("toc-empty"),
+        btnCloseToc: document.getElementById("btn-close-toc"),
+        btnExpandToc: document.getElementById("btn-expand-toc"),
         toast: document.getElementById("toast"),
         privacyDialog: document.getElementById("privacy-dialog"),
         btnPrivacyClose: document.getElementById("btn-privacy-close"),
@@ -90,6 +97,14 @@
         rendererReady: false,
         rendererQueue: [],
         visibleNodes: [],      // flat list of focusable sidebar buttons
+        toc: {
+            headings: [],
+            activeId: null,
+            compact: false,
+            expanded: false,
+            modalOpen: false,
+            reservedWidth: -1,
+        },
     };
 
     // ---------- renderer messaging ----------
@@ -197,6 +212,26 @@
                 return RENDERER_SHORTCUTS.has(msg.id);
             case "zoomChanged":
                 return Number.isFinite(msg.factor);
+            case "toc":
+                return Array.isArray(msg.headings)
+                    && msg.headings.length <= 512
+                    && msg.headings.every(function (heading) {
+                        return !!heading
+                            && typeof heading === "object"
+                            && Number.isInteger(heading.level)
+                            && heading.level >= 1
+                            && heading.level <= 6
+                            && typeof heading.title === "string"
+                            && heading.title.length <= 512
+                            && typeof heading.id === "string"
+                            && heading.id.length > 0
+                            && heading.id.length <= 256;
+                    });
+            case "toc/active":
+                return msg.id === null
+                    || (typeof msg.id === "string" && msg.id.length > 0 && msg.id.length <= 256);
+            case "modal":
+                return typeof msg.open === "boolean";
             case "remoteContent":
                 return /^[a-f0-9]{64}$/.test(msg.documentId || "")
                     && Number.isInteger(msg.blocked) && msg.blocked >= 0 && msg.blocked <= 10000
@@ -341,12 +376,14 @@
         switch (msg.type) {
             case "ready":
                 state.rendererReady = true;
+                state.toc.reservedWidth = -1;
                 stopHandshakeWatch();
                 showDeadBar(false);
                 pushThemeToRenderer();
                 pushSettingsToRenderer();
                 flushRendererQueue();
                 if (state.doc) pushDocToRenderer(state.doc);
+                updateTocLayout();
                 break;
             case "diagnostic":
                 reportRendererDiagnostic(msg.report);
@@ -368,6 +405,18 @@
                 break;
             case "zoomChanged":
                 applyZoom(msg.factor, { fromRenderer: true });
+                break;
+            case "toc":
+                state.toc.headings = msg.headings;
+                renderToc();
+                break;
+            case "toc/active":
+                setActiveTocHeading(msg.id);
+                break;
+            case "modal":
+                state.toc.modalOpen = msg.open;
+                if (msg.open) state.toc.expanded = false;
+                updateTocLayout();
                 break;
             case "remoteContent":
                 handleRemoteContentMessage(msg);
@@ -400,6 +449,99 @@
                 type: "search",
                 query: state.search.query,
                 caseSensitive: state.search.caseSensitive,
+            });
+        }
+    }
+
+    // ---------- table of contents ----------
+
+    var TOC_RESERVED_WIDTH = 292;
+    var TOC_MIN_PREVIEW_WIDTH = 660;
+
+    function resetToc() {
+        state.toc.headings = [];
+        state.toc.activeId = null;
+        state.toc.expanded = false;
+        renderToc();
+        updateTocLayout();
+    }
+
+    function renderToc() {
+        var headings = state.toc.headings;
+        el.tocList.replaceChildren();
+        el.tocEmpty.hidden = headings.length > 0;
+        if (!headings.length) return;
+
+        var minLevel = headings.reduce(function (minimum, heading) {
+            return Math.min(minimum, heading.level);
+        }, 6);
+        var fragment = document.createDocumentFragment();
+
+        headings.forEach(function (heading) {
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "toc-item";
+            button.dataset.headingId = heading.id;
+            button.style.setProperty("--toc-indent", ((heading.level - minLevel) * 14) + "px");
+            button.textContent = heading.title || "Untitled heading";
+            button.title = heading.title || "Untitled heading";
+            fragment.appendChild(button);
+        });
+
+        el.tocList.appendChild(fragment);
+        setActiveTocHeading(state.toc.activeId);
+    }
+
+    function setActiveTocHeading(id) {
+        state.toc.activeId = id;
+        var activeButton = null;
+        el.tocList.querySelectorAll(".toc-item").forEach(function (button) {
+            var active = id !== null && button.dataset.headingId === id;
+            button.classList.toggle("active", active);
+            if (active) {
+                button.setAttribute("aria-current", "location");
+                activeButton = button;
+            } else {
+                button.removeAttribute("aria-current");
+            }
+        });
+        if (activeButton && !el.tocPane.hidden) {
+            try { activeButton.scrollIntoView({ block: "nearest" }); } catch (e) { /* best-effort */ }
+        }
+    }
+
+    function updateTocLayout() {
+        var width = el.previewWrap.getBoundingClientRect().width || el.previewWrap.clientWidth;
+        var compact = width > 0 && width < TOC_MIN_PREVIEW_WIDTH;
+        if (compact !== state.toc.compact) {
+            state.toc.compact = compact;
+            state.toc.expanded = false;
+        }
+
+        var preferred = !!state.settings && state.settings.tocVisible !== false;
+        var available = preferred && !!state.doc && !state.toc.modalOpen;
+        var paneVisible = available && (!compact || state.toc.expanded);
+        var compactButtonVisible = available && compact && !state.toc.expanded;
+
+        el.tocPane.hidden = !paneVisible;
+        el.tocPane.dataset.layout = compact ? "compact" : "full";
+        el.btnExpandToc.hidden = !compactButtonVisible;
+        el.btnExpandToc.setAttribute("aria-expanded", String(compact && state.toc.expanded));
+        el.btnToggleToc.disabled = state.toc.modalOpen;
+        el.btnToggleToc.setAttribute("aria-pressed", String(preferred));
+        el.btnToggleToc.title = state.toc.modalOpen
+            ? "Mermaid の拡大表示中は目次を変更できません"
+            : preferred ? "目次を非表示" : "目次を表示";
+        el.btnCloseToc.setAttribute("aria-label", compact ? "目次を閉じる" : "目次を非表示");
+        el.btnCloseToc.title = compact ? "目次を閉じる" : "目次を非表示";
+
+        var reservedWidth = paneVisible && !compact ? TOC_RESERVED_WIDTH : 0;
+        if (state.toc.reservedWidth === reservedWidth) return;
+        state.toc.reservedWidth = reservedWidth;
+        if (state.rendererReady) {
+            postToRenderer({
+                type: "toc/layout",
+                reservedTrailingWidth: reservedWidth,
             });
         }
     }
@@ -703,6 +845,7 @@
         events.addEventListener("doc", function (ev) {
             var doc = JSON.parse(ev.data);
             state.doc = doc;
+            resetToc();
             resetRemoteContentUi();
             renderDocHeader(doc);
             el.emptyState.hidden = true;
@@ -710,6 +853,7 @@
         });
         events.addEventListener("empty", function () {
             state.doc = null;
+            resetToc();
             resetRemoteContentUi();
             renderDocHeader(null);
             el.emptyState.hidden = false;
@@ -761,6 +905,7 @@
         el.persistSessionHistory.checked = settings.persistSessionHistory === true;
         el.sessionRetentionDays.value = String(settings.sessionRetentionDays || 7);
         el.sessionRetentionDays.disabled = settings.persistSessionHistory !== true;
+        updateTocLayout();
         if (initial !== false) pushSettingsToRenderer();
     }
 
@@ -1231,6 +1376,7 @@
             .then(function (result) {
                 if (!result.doc) return;
                 state.doc = result.doc;
+                resetToc();
                 resetRemoteContentUi();
                 pushDocToRenderer(result.doc);
             })
@@ -1385,6 +1531,13 @@
             }
             if (!el.findbar.hidden) {
                 closeFind();
+                return;
+            }
+            if (state.toc.compact && state.toc.expanded) {
+                ev.preventDefault();
+                state.toc.expanded = false;
+                updateTocLayout();
+                el.btnExpandToc.focus();
                 return;
             }
         }
@@ -1581,6 +1734,44 @@
     el.btnToggleSidebar.addEventListener("click", function () {
         saveSettings({ sidebarVisible: !state.settings.sidebarVisible }, true);
     });
+
+    el.btnToggleToc.addEventListener("click", function () {
+        saveSettings({ tocVisible: state.settings.tocVisible === false }, true);
+    });
+
+    el.btnCloseToc.addEventListener("click", function () {
+        if (state.toc.compact) {
+            state.toc.expanded = false;
+            updateTocLayout();
+            el.btnExpandToc.focus();
+            return;
+        }
+        saveSettings({ tocVisible: false }, true);
+    });
+
+    el.btnExpandToc.addEventListener("click", function () {
+        state.toc.expanded = true;
+        updateTocLayout();
+        var active = el.tocList.querySelector(".toc-item.active");
+        (active || el.btnCloseToc).focus();
+    });
+
+    el.tocList.addEventListener("click", function (ev) {
+        var button = ev.target.closest(".toc-item");
+        if (!button || !el.tocList.contains(button)) return;
+        postToRenderer({ type: "toc/scroll", id: button.dataset.headingId });
+        if (state.toc.compact) {
+            state.toc.expanded = false;
+            updateTocLayout();
+            el.btnExpandToc.focus();
+        }
+    });
+
+    if (typeof ResizeObserver === "function") {
+        new ResizeObserver(updateTocLayout).observe(el.previewWrap);
+    } else {
+        window.addEventListener("resize", updateTocLayout);
+    }
 
     el.btnOpenBrowser.addEventListener("click", function () {
         api("/api/open-browser", {})

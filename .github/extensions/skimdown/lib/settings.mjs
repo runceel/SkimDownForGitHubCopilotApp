@@ -12,6 +12,7 @@ const SESSION_RETENTION_DAYS = [1, 7, 30];
 
 const DEFAULTS = {
     sidebarVisible: true,
+    tocVisible: true,
     sidebarWidth: 260,
     sidebarPosition: "left", // "left" | "right"
     viewMode: "tree", // "tree" | "recent"
@@ -112,6 +113,7 @@ export async function setExpanded(rootPath, expandedRelPaths) {
 function normalize(value) {
     const out = { ...DEFAULTS, ...value };
     out.sidebarVisible = out.sidebarVisible !== false;
+    out.tocVisible = out.tocVisible !== false;
     out.sidebarWidth = clamp(toNumber(out.sidebarWidth, DEFAULTS.sidebarWidth), 160, 520);
     out.sidebarPosition = out.sidebarPosition === "right" ? "right" : "left";
     out.viewMode = out.viewMode === "recent" ? "recent" : "tree";
