@@ -1122,8 +1122,13 @@ function validateProtectedRequest(req, parsed, expectedOrigin, capabilityToken, 
         return { status: 403, message: "cross-site request denied" };
     }
 
+    // Browsers omit `Origin` on same-origin GETs — including the `EventSource`
+    // request behind the shell's event stream — so requiring it there would
+    // reject the only client this server exists for. `Sec-Fetch-Site` above and
+    // the capability already carry the CSRF boundary for reads; an `Origin`,
+    // when the browser does send one, still has to match.
     const origin = singleHeader(req.headers.origin);
-    const originRequired = sse || req.method !== "GET";
+    const originRequired = req.method !== "GET";
     if ((originRequired && !origin) || (origin && origin !== expectedOrigin)) {
         return { status: 403, message: "invalid origin" };
     }

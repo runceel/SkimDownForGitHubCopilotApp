@@ -527,16 +527,35 @@
         return 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
     }
 
+    var darkSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+    /**
+     * Whether the host actually defines a theme token. `readResolved` always
+     * yields a color, so ask twice with different fallbacks — agreement means
+     * the value came from the token rather than from the fallback.
+     */
+    function hasHostToken(name) {
+        var a = readResolved(name, "#ff0000");
+        var b = readResolved(name, "#00ff00");
+        return !!a && !!b && a.r === b.r && a.g === b.g && a.b === b.b;
+    }
+
     function isDarkTone() {
         // The host may set these on either the root element or the body.
         var tone = readAttr("data-theme-tone") || readAttr("data-color-mode");
         if (tone.indexOf("dark") >= 0) return true;
         if (tone.indexOf("light") >= 0) return false;
-        // No usable attribute: fall back to the luminance of what the shell is
-        // actually painted with, which the browser has already resolved.
-        var painted = toRgb(window.getComputedStyle(document.body).backgroundColor);
-        var bg = painted && painted.a > 0 ? painted : readResolved("--background-color-default", "#ffffff");
-        return luminance(bg) < 128;
+        // A host that themes the shell through tokens rather than attributes:
+        // take the tone straight off the token it supplied.
+        if (hasHostToken("--background-color-default")) {
+            return luminance(readResolved("--background-color-default", "#ffffff")) < 128;
+        }
+        // Nothing from the host, so the shell's own palette is in play. Ask the
+        // WebView instead of measuring what is painted: shell.css resolves that
+        // palette through `light-dark()` against the `color-scheme` that
+        // `syncShellColorScheme` writes back onto the root, so measuring it
+        // would only echo the previous answer and never notice a theme switch.
+        return darkSchemeQuery.matches;
     }
 
     function buildThemeMessage() {
@@ -622,6 +641,19 @@
         attributes: true,
         attributeFilter: ["data-color-mode", "data-theme-tone", "data-dark-theme", "data-light-theme", "style", "class"],
     });
+
+    // Switching the app between light and dark touches nothing in this document
+    // when the host supplies no theme attributes, so the observer above never
+    // fires and the preview would keep the tone it was first given.
+    if (darkSchemeQuery.addEventListener) {
+        darkSchemeQuery.addEventListener("change", function () {
+            pushThemeToRenderer();
+        });
+    } else if (darkSchemeQuery.addListener) {
+        darkSchemeQuery.addListener(function () {
+            pushThemeToRenderer();
+        });
+    }
 
     // ---------- server transport ----------
 
