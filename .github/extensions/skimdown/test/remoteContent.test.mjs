@@ -55,7 +55,7 @@ test("DNS answers are rejected when any address is private", async () => {
             { address: "93.184.216.34", family: 4 },
             { address: "127.0.0.1", family: 4 },
         ]),
-        /プライベート IP/,
+        /private IP/,
     );
 });
 

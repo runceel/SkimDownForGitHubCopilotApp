@@ -141,7 +141,7 @@
                 throw new Error("renderer origin must differ from shell origin");
             }
         } catch (error) {
-            showDeadBar(true, "プレビューの安全な接続先を初期化できませんでした。");
+            showDeadBar(true, "Could not initialize a secure preview origin.");
             reportDiag("renderer-origin-invalid");
             return false;
         }
@@ -257,7 +257,7 @@
 
     function rendererFailureHint() {
         if (rendererLogs.length) return rendererLogs[0];
-        return "レンダラーの初期化が完了しませんでした";
+        return "Renderer initialization did not complete";
     }
 
     function reportDiag(reason) {
@@ -349,8 +349,8 @@
             reportDiag("handshake-failed");
             var hint = rendererFailureHint();
             showDeadBar(true, hint
-                ? "プレビューを初期化できませんでした: " + hint
-                : "プレビューを初期化できませんでした。");
+                ? "Could not initialize preview: " + hint
+                : "Could not initialize preview.");
         }, HANDSHAKE_GRACE_MS);
     }
 
@@ -530,10 +530,10 @@
         el.btnToggleToc.disabled = state.toc.modalOpen;
         el.btnToggleToc.setAttribute("aria-pressed", String(preferred));
         el.btnToggleToc.title = state.toc.modalOpen
-            ? "Mermaid の拡大表示中は目次を変更できません"
-            : preferred ? "目次を非表示" : "目次を表示";
-        el.btnCloseToc.setAttribute("aria-label", compact ? "目次を閉じる" : "目次を非表示");
-        el.btnCloseToc.title = compact ? "目次を閉じる" : "目次を非表示";
+            ? "The table of contents cannot be changed while the Mermaid zoom view is open"
+            : preferred ? "Hide table of contents" : "Show table of contents";
+        el.btnCloseToc.setAttribute("aria-label", compact ? "Close table of contents" : "Hide table of contents");
+        el.btnCloseToc.title = compact ? "Close table of contents" : "Hide table of contents";
 
         var reservedWidth = paneVisible && !compact ? TOC_RESERVED_WIDTH : 0;
         if (state.toc.reservedWidth === reservedWidth) return;
@@ -810,7 +810,7 @@
             return res.json().catch(function () {
                 return {};
             }).then(function (json) {
-                if (!res.ok) throw new Error(json && json.error ? json.error : "リクエストに失敗しました");
+                if (!res.ok) throw new Error(json && json.error ? json.error : "Request failed");
                 return json;
             });
         });
@@ -965,14 +965,14 @@
     function clearSessionHistory(scope) {
         var all = scope === "all";
         var message = all
-            ? "SkimDown が保存したすべてのセッション履歴を消去します。続行しますか？"
-            : "このセッションのインライン本文、パス、選択履歴を消去します。続行しますか？";
+            ? "Clear all session history saved by SkimDown. Continue?"
+            : "Clear this session's inline content, paths, and selection history. Continue?";
         if (!window.confirm(message)) return;
 
         setPrivacyBusy(true);
         api("/api/session-history", { scope: scope })
             .then(function () {
-                showToast(all ? "保存済み履歴をすべて消去しました" : "このセッションの履歴を消去しました");
+                showToast(all ? "Cleared all saved history" : "Cleared this session's history");
             })
             .catch(showError)
             .finally(function () {
@@ -1021,15 +1021,17 @@
             var note = document.createElement("div");
             note.className = "empty-note";
             note.textContent = state.filter
-                ? "条件に一致する Markdown はありません。"
+                ? "No matching Markdown found."
                 : listing.mode === "session"
-                  ? "このセッションで生成された Markdown はまだありません。"
-                  : "Markdown ファイルが見つかりません。";
+                  ? "No Markdown has been generated in this session yet."
+                  : "No Markdown files found.";
             container.appendChild(note);
         }
 
         el.tree.replaceChildren(container);
-        el.count.textContent = listing.count > 0 ? listing.count + " 件" : "";
+        el.count.textContent = listing.count > 0
+            ? listing.count + (listing.count === 1 ? " item" : " items")
+            : "";
         markSelection();
     }
 
@@ -1263,7 +1265,7 @@
 
     function renderFindCount(total, current) {
         if (!total) {
-            el.findCount.textContent = state.search.query ? "0 件" : "";
+            el.findCount.textContent = state.search.query ? "0 results" : "";
             return;
         }
         el.findCount.textContent = (current + 1) + " / " + total;
@@ -1289,7 +1291,7 @@
                     promptExternal(result.href);
                     return null;
                 }
-                showToast("リンク先を開けません: " + (msg.href || ""));
+                showToast("Could not open link target: " + (msg.href || ""));
                 return null;
             })
             .catch(showError);
@@ -1329,10 +1331,10 @@
                 ? " (" + msg.hosts.join(", ") + ")"
                 : "";
             el.remoteText.textContent =
-                "リモートコンテンツ " + blocked + " 件をブロックしました" + hosts +
-                "。読み込むと公開ネットワーク上の画像・メディアへ接続します。";
+                "Blocked " + blocked + " remote content " + (blocked === 1 ? "item" : "items") + hosts +
+                ". Loading will connect to images and media on the public network.";
             el.remoteText.title =
-                "許可はこの文書の現在の内容だけに適用されます。内容が変わると再度確認します。";
+                "Permission applies only to the current content of this document. You will be asked again if it changes.";
             el.btnRemoteLoad.hidden = false;
             el.remotebar.hidden = false;
             return;
@@ -1340,8 +1342,9 @@
 
         if (policyBlocked > 0) {
             el.remoteText.textContent =
-                "リモートコンテンツ " + policyBlocked +
-                " 件は、loopback、link-local、プライベートネットワーク宛てのため読み込みませんでした。";
+                "Did not load " + policyBlocked + " remote content " +
+                (policyBlocked === 1 ? "item" : "items") +
+                " because the destination is loopback, link-local, or on a private network.";
             el.remoteText.title = "";
             el.btnRemoteLoad.hidden = true;
             el.remotebar.hidden = false;
@@ -1363,7 +1366,7 @@
 
     function showRemoteContentFailure() {
         el.remoteText.textContent =
-            "一部のリモートコンテンツを読み込めませんでした。プライベート IP、未対応形式、または通信エラーの可能性があります。";
+            "Some remote content could not be loaded. It may use a private IP address, an unsupported format, or have a network error.";
         el.remoteText.title = "";
         el.btnRemoteLoad.hidden = true;
         el.remotebar.hidden = false;
@@ -1393,7 +1396,7 @@
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).then(
                 function () {
-                    showToast("コピーしました");
+                    showToast("Copied");
                 },
                 function () {
                     legacyCopy(text);
@@ -1418,7 +1421,7 @@
             ok = false;
         }
         document.body.removeChild(area);
-        showToast(ok ? "コピーしました" : "コピーできませんでした");
+        showToast(ok ? "Copied" : "Could not copy");
     }
 
     // ---------- zoom / width ----------
@@ -1444,7 +1447,7 @@
         var value = CONTENT_WIDTHS[index];
         saveSettings({ contentMaxWidth: value }, true);
         postToRenderer({ type: "contentMaxWidth", value: value });
-        showToast("本文の最大幅: " + (value === "none" ? "制限なし" : value));
+        showToast("Maximum content width: " + (value === "none" ? "Unlimited" : value));
     }
 
     // ---------- shortcuts ----------
@@ -1701,14 +1704,14 @@
         var enabled = el.persistSessionHistory.checked;
         savePrivacySettings(
             { persistSessionHistory: enabled },
-            enabled ? "セッション履歴の保存を有効にしました" : "保存を無効にし、保存済み履歴を消去しました",
+            enabled ? "Enabled session history saving" : "Disabled saving and cleared saved history",
         );
     });
 
     el.sessionRetentionDays.addEventListener("change", function () {
         savePrivacySettings(
             { sessionRetentionDays: Number(el.sessionRetentionDays.value) },
-            "保持期間を更新しました",
+            "Updated retention period",
         );
     });
 
@@ -1776,7 +1779,7 @@
     el.btnOpenBrowser.addEventListener("click", function () {
         api("/api/open-browser", {})
             .then(function (result) {
-                if (!result.ok) showToast(result.error || "ブラウザーで開けませんでした");
+                if (!result.ok) showToast(result.error || "Could not open in browser");
             })
             .catch(showError);
     });
@@ -1834,7 +1837,7 @@
         if (!href) return;
         api("/api/open-external", { href: href })
             .then(function (result) {
-                if (!result.ok) showToast(result.error || "リンクを開けませんでした");
+                if (!result.ok) showToast(result.error || "Could not open link");
             })
             .catch(showError);
     });
