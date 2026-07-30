@@ -19,6 +19,7 @@
             <symbol id="i-width" viewBox="0 0 16 16"><path d="M0 2h1.5v12H0Zm14.5 0H16v12h-1.5ZM4.28 5.22 5.34 6.28 4.12 7.5h7.76l-1.22-1.22 1.06-1.06L14.28 8l-2.56 2.78-1.06-1.06L11.88 8.5H4.12l1.22 1.22-1.06 1.06L1.72 8Z"/></symbol>
             <symbol id="i-folder-open" viewBox="0 0 16 16"><path d="M1.75 2h3.63c.46 0 .9.18 1.23.51L7.9 3.65h5.35c.97 0 1.75.78 1.75 1.75v.6H16l-1.7 6.63a1.75 1.75 0 0 1-1.7 1.32H1.75A1.75 1.75 0 0 1 0 12.2V3.75C0 2.78.78 2 1.75 2Zm11.75 4v-.6a.25.25 0 0 0-.25-.25H7.6a.75.75 0 0 1-.53-.22L5.55 3.57a.25.25 0 0 0-.17-.07H1.75a.25.25 0 0 0-.25.25V12.2c0 .07.02.13.06.18L3.1 6.57A.75.75 0 0 1 3.83 6Z"/></symbol>
             <symbol id="i-swap" viewBox="0 0 16 16"><path d="M9.72 1.72 13 5l-3.28 3.28-1.06-1.06L10.38 5.5H2V4h8.38L8.66 2.78ZM6.28 8.72l1.06 1.06L5.62 11.5H14V13H5.62l1.72 1.72-1.06 1.06L3 12.5Z"/></symbol>
+            <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 .5 14 3v4.38c0 3.76-2.42 6.67-6 8.12-3.58-1.45-6-4.36-6-8.12V3Zm0 1.62L3.5 4v3.38c0 2.93 1.75 5.3 4.5 6.5 2.75-1.2 4.5-3.57 4.5-6.5V4Z"/></symbol>
             <symbol id="i-external" viewBox="0 0 16 16"><path d="M9 1h6v6h-1.5V3.56L7.53 9.53 6.47 8.47l5.97-5.97H9ZM2.75 3h3.5v1.5h-3.5a.25.25 0 0 0-.25.25v8.5c0 .14.11.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3.5H13v3.5A1.75 1.75 0 0 1 11.25 15h-8.5A1.75 1.75 0 0 1 1 13.25v-8.5C1 3.78 1.78 3 2.75 3Z"/></symbol>
             <symbol id="i-close" viewBox="0 0 16 16"><path d="M3.72 2.66 8 6.94l4.28-4.28 1.06 1.06L9.06 8l4.28 4.28-1.06 1.06L8 9.06l-4.28 4.28-1.06-1.06L6.94 8 2.66 3.72Z"/></symbol>
             <symbol id="i-up" viewBox="0 0 16 16"><path d="m8 4.5 5 5-1.06 1.06L8 6.62 4.06 10.56 3 9.5Z"/></symbol>
@@ -53,9 +54,14 @@
             <div id="tree" role="tree" tabindex="-1"></div>
             <div class="sidebar-foot">
                 <span id="count"></span>
-                <button type="button" class="icon-button" id="btn-swap-sidebar" title="サイドバーを左右入れ替え" aria-label="サイドバーを左右入れ替え">
-                    <svg aria-hidden="true"><use href="#i-swap" /></svg>
-                </button>
+                <span class="sidebar-foot-actions">
+                    <button type="button" class="icon-button" id="btn-privacy" title="プライバシーと履歴" aria-label="プライバシーと履歴">
+                        <svg aria-hidden="true"><use href="#i-shield" /></svg>
+                    </button>
+                    <button type="button" class="icon-button" id="btn-swap-sidebar" title="サイドバーを左右入れ替え" aria-label="サイドバーを左右入れ替え">
+                        <svg aria-hidden="true"><use href="#i-swap" /></svg>
+                    </button>
+                </span>
             </div>
         </aside>
 
@@ -145,6 +151,44 @@
     </div>
 
     <div id="toast" role="status" hidden></div>
+
+    <dialog id="privacy-dialog" aria-labelledby="privacy-title">
+        <div class="dialog-head">
+            <h2 id="privacy-title">プライバシーとセッション履歴</h2>
+            <button type="button" class="icon-button" id="btn-privacy-close" title="閉じる" aria-label="閉じる">
+                <svg aria-hidden="true"><use href="#i-close" /></svg>
+            </button>
+        </div>
+        <div class="dialog-body">
+            <label class="setting-row">
+                <span>
+                    <strong>セッション履歴を端末に保存</strong>
+                    <small>既定では保存しません。表示中はメモリ内だけで保持します。</small>
+                </span>
+                <input type="checkbox" id="persist-session-history" />
+            </label>
+            <label class="setting-row">
+                <span>
+                    <strong>保持期間</strong>
+                    <small>期限を過ぎた履歴は起動時に自動削除します。</small>
+                </span>
+                <select id="session-retention-days">
+                    <option value="1">1 日</option>
+                    <option value="7">7 日</option>
+                    <option value="30">30 日</option>
+                </select>
+            </label>
+            <p class="privacy-note">
+                保存対象はインライン Markdown 本文（最大 50 件、各 2 MB）、編集した Markdown のパス、
+                最後の選択です。保存先は
+                <code>$COPILOT_HOME/extensions/skimdown/artifacts/sessions/</code> です。
+            </p>
+            <div class="danger-zone">
+                <button type="button" class="text-button danger-button" id="btn-clear-current-history">このセッションの履歴を消去</button>
+                <button type="button" class="text-button danger-button" id="btn-clear-all-history">保存済み履歴をすべて消去</button>
+            </div>
+        </div>
+    </dialog>
 
     <script src="shell.js"></script>
 </body>

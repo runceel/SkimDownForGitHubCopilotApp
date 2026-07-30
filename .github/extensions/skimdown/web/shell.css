@@ -125,6 +125,12 @@ body[data-sidebar-position="right"] #sidebar {
     font-size: 0.85em;
 }
 
+.sidebar-foot-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
 .group-label {
     padding: 10px 10px 4px;
     color: var(--text-color-muted, #59636e);
@@ -372,6 +378,99 @@ body[data-sidebar-position="right"] #sidebar {
 
 .text-button:hover {
     background: var(--true-color-blue-muted, rgba(9, 105, 218, 0.1));
+}
+
+/* ---------- privacy dialog ---------- */
+
+#privacy-dialog {
+    width: min(520px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid var(--border-color-default, #d0d7de);
+    border-radius: 10px;
+    background: var(--background-color-default, #ffffff);
+    color: var(--text-color-default, #1f2328);
+    box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
+    font: inherit;
+}
+
+#privacy-dialog::backdrop {
+    background: rgb(0 0 0 / 45%);
+}
+
+.dialog-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color-default, #d0d7de);
+}
+
+.dialog-head h2 {
+    flex: 1 1 auto;
+    margin: 0;
+    font-size: 1em;
+}
+
+.dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px;
+}
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.setting-row span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.setting-row small,
+.privacy-note {
+    color: var(--text-color-muted, #59636e);
+    font-size: 0.82em;
+}
+
+.setting-row select {
+    min-width: 88px;
+    padding: 4px 6px;
+    border: 1px solid var(--border-color-default, #d0d7de);
+    border-radius: 6px;
+    background: var(--background-color-default, #ffffff);
+    color: inherit;
+    font: inherit;
+}
+
+.privacy-note {
+    margin: 0;
+    line-height: 1.5;
+}
+
+.privacy-note code {
+    overflow-wrap: anywhere;
+}
+
+.danger-zone {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color-default, #d0d7de);
+}
+
+.danger-button {
+    border-color: var(--true-color-red, #cf222e);
+    color: var(--true-color-red, #cf222e);
+}
+
+.danger-button:hover {
+    background: var(--true-color-red-muted, #ffebe9);
 }
 
 /* ---------- preview ---------- */

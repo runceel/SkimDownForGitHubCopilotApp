@@ -1,9 +1,9 @@
 # 0005: 永続状態をユーザー、セッション、文書の同一性で分ける
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-07-30
 - Supersedes: なし
-- Superseded by: なし
+- Superseded by: [0010](0010-make-session-history-persistence-explicit-and-expiring.md)
 
 ## Context
 

@@ -27,14 +27,27 @@ import {
     readMarkdownFile,
     classifyPath,
 } from "./sources.mjs";
-import { loadSettings, updateSettings, setExpanded } from "./settings.mjs";
+import {
+    loadSettings,
+    updateSettings,
+    updateSettingsWithPrevious,
+    setExpanded,
+} from "./settings.mjs";
 import {
     loadRegistry,
     getInlineDoc,
     rememberSelection,
+    clearSessionHistory,
+    clearAllSessionHistory,
+    updateSessionPrivacySettings,
     registryEvents,
 } from "./sessionDocs.mjs";
-import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag } from "./paths.mjs";
+import {
+    sessionArtifactsDir,
+    resolveWorkspaceRoot,
+    appendDiag,
+    withStateLock,
+} from "./paths.mjs";
 import {
     DIAG_ENTRY_MAX_BYTES,
     DIAG_REQUEST_MAX_BYTES,
@@ -98,6 +111,7 @@ export async function createInstance(ctx) {
         listing: null,
         selection: null,
         doc: null,
+        historyMemoryGeneration: 0,
         notice: null,
     };
 
@@ -118,10 +132,14 @@ export async function createInstance(ctx) {
         void handleFilesystemChange();
     });
 
-    const onRegistryChanged = (sessionId) => {
+    const onRegistryChanged = (sessionId, change) => {
         if (sessionId !== ctx.sessionId) return;
-        if (state.source !== SOURCE_SESSION) return;
-        void refreshListing({ push: true });
+        void (async () => {
+            if (change?.kind === "cleared") {
+                await reconcileHistoryClear({ push: true });
+            }
+            if (state.source === SOURCE_SESSION) await refreshListing({ push: true });
+        })();
     };
     registryEvents.on("changed", onRegistryChanged);
 
@@ -227,10 +245,12 @@ export async function createInstance(ctx) {
     }
 
     async function buildState() {
-        const [settings, sources] = await Promise.all([
-            loadSettings(),
-            describeSources({ sessionId: ctx.sessionId, workspacePath: state.workspacePath }),
-        ]);
+        const settings = await loadSettings({ fresh: true });
+        await reconcileHistoryClear({ settings });
+        const sources = await describeSources({
+            sessionId: ctx.sessionId,
+            workspacePath: state.workspacePath,
+        });
         return {
             instanceId: state.instanceId,
             sessionId: state.sessionId,
@@ -245,6 +265,33 @@ export async function createInstance(ctx) {
             contentBaseUri,
             rendererBaseUri,
         };
+    }
+
+    function historyMemoryGeneration(settings) {
+        const sessionGeneration = settings.sessionDeletionGenerations?.[ctx.sessionId] || 0;
+        return Math.max(settings.sessionMemoryClearGeneration || 0, sessionGeneration);
+    }
+
+    async function captureHistoryMemoryGeneration() {
+        const settings = await loadSettings({ fresh: true });
+        state.historyMemoryGeneration = historyMemoryGeneration(settings);
+    }
+
+    async function reconcileHistoryClear({ settings, push = false } = {}) {
+        const currentSettings = settings || await loadSettings({ fresh: true });
+        const generation = historyMemoryGeneration(currentSettings);
+        if (state.historyMemoryGeneration >= generation) return false;
+
+        state.historyMemoryGeneration = generation;
+        if (!state.doc) return false;
+        state.selection = null;
+        state.doc = null;
+        updateWatchTargets();
+        if (push) {
+            broadcast("empty", {});
+            broadcast("state", await buildState());
+        }
+        return true;
     }
 
     function identifyRemoteContent(doc) {
@@ -289,67 +336,73 @@ export async function createInstance(ctx) {
     }
 
     async function selectFile(absPath, { push = true } = {}) {
-        const resolved = canonicalPath(absPath);
-        requireApprovedPath(resolved);
-        const file = await readMarkdownFile(resolved);
-        const dir = path.dirname(resolved);
-        const token = contentTokenFor(dir);
+        return withStateLock(async () => {
+            const resolved = canonicalPath(absPath);
+            requireApprovedPath(resolved);
+            const file = await readMarkdownFile(resolved);
+            const dir = path.dirname(resolved);
+            const token = contentTokenFor(dir);
 
-        state.selection = {
-            kind: "file",
-            path: resolved,
-            title: path.basename(resolved),
-            subtitle: displayPath(resolved),
-            mtimeMs: file.mtimeMs,
-        };
-        state.doc = setRemoteContentIdentity({
-            kind: "file",
-            title: state.selection.title,
-            subtitle: state.selection.subtitle,
-            path: resolved,
-            markdown: file.markdown,
-            // `sourcePath` must contain a directory segment: renderer.js only
-            // rewrites relative image URLs when it can derive a source dir.
-            sourcePath: `d/${token}/${encodeURIComponent(path.basename(resolved))}`,
-            contentBaseUri,
+            state.selection = {
+                kind: "file",
+                path: resolved,
+                title: path.basename(resolved),
+                subtitle: displayPath(resolved),
+                mtimeMs: file.mtimeMs,
+            };
+            state.doc = setRemoteContentIdentity({
+                kind: "file",
+                title: state.selection.title,
+                subtitle: state.selection.subtitle,
+                path: resolved,
+                markdown: file.markdown,
+                // `sourcePath` must contain a directory segment: renderer.js only
+                // rewrites relative image URLs when it can derive a source dir.
+                sourcePath: `d/${token}/${encodeURIComponent(path.basename(resolved))}`,
+                contentBaseUri,
+            });
+            updateWatchTargets();
+            await rememberSelection(ctx.sessionId, { kind: "file", path: resolved }, state.root);
+            await captureHistoryMemoryGeneration();
+            if (push) {
+                broadcast("doc", publicDoc());
+                broadcast("state", await buildState());
+            }
+            return state.doc;
         });
-        updateWatchTargets();
-        await rememberSelection(ctx.sessionId, { kind: "file", path: resolved }, state.root);
-        if (push) {
-            broadcast("doc", publicDoc());
-            broadcast("state", await buildState());
-        }
-        return state.doc;
     }
 
     async function selectInline(id, { push = true } = {}) {
-        const doc = await getInlineDoc(ctx.sessionId, id);
-        if (!doc) {
-            const error = new Error(`Inline document not found: ${id}`);
-            error.code = "not_found";
-            throw error;
-        }
-        state.selection = {
-            kind: "inline",
-            id: doc.id,
-            title: doc.title,
-            subtitle: "エージェントが表示した Markdown",
-        };
-        state.doc = setRemoteContentIdentity({
-            kind: "inline",
-            title: doc.title,
-            subtitle: state.selection.subtitle,
-            id: doc.id,
-            markdown: doc.markdown,
-            sourcePath: "",
-            contentBaseUri: "",
+        return withStateLock(async () => {
+            const doc = await getInlineDoc(ctx.sessionId, id);
+            if (!doc) {
+                const error = new Error(`Inline document not found: ${id}`);
+                error.code = "not_found";
+                throw error;
+            }
+            state.selection = {
+                kind: "inline",
+                id: doc.id,
+                title: doc.title,
+                subtitle: "エージェントが表示した Markdown",
+            };
+            state.doc = setRemoteContentIdentity({
+                kind: "inline",
+                title: doc.title,
+                subtitle: state.selection.subtitle,
+                id: doc.id,
+                markdown: doc.markdown,
+                sourcePath: "",
+                contentBaseUri: "",
+            });
+            await rememberSelection(ctx.sessionId, { kind: "inline", id: doc.id }, state.root);
+            await captureHistoryMemoryGeneration();
+            if (push) {
+                broadcast("doc", publicDoc());
+                broadcast("state", await buildState());
+            }
+            return state.doc;
         });
-        await rememberSelection(ctx.sessionId, { kind: "inline", id: doc.id }, state.root);
-        if (push) {
-            broadcast("doc", publicDoc());
-            broadcast("state", await buildState());
-        }
-        return state.doc;
     }
 
     /** Pick a sensible first document when a source is opened with no selection. */
@@ -612,9 +665,25 @@ export async function createInstance(ctx) {
                 return sendJson(res, 200, { ok: true, count: state.listing?.count ?? 0 });
             }
             case "/api/settings": {
-                const settings = await updateSettings(body || {});
+                const privacyRequested =
+                    Object.hasOwn(body || {}, "persistSessionHistory")
+                    || Object.hasOwn(body || {}, "sessionRetentionDays");
+                const settings = privacyRequested
+                    ? await updateSessionPrivacySettings(ctx.sessionId, body || {})
+                    : (await updateSettingsWithPrevious(body || {})).settings;
                 broadcast("settings", settings);
                 return sendJson(res, 200, { ok: true, settings });
+            }
+            case "/api/session-history": {
+                const scope = body.scope === "all" ? "all" : "current";
+                const deleted = scope === "all"
+                    ? await clearAllSessionHistory()
+                    : (await clearSessionHistory(ctx.sessionId), 1);
+                state.selection = null;
+                state.doc = null;
+                await refreshListing({ push: true });
+                broadcast("empty", {});
+                return sendJson(res, 200, { ok: true, scope, deleted });
             }
             case "/api/remote-content/allow": {
                 try {
@@ -828,8 +897,16 @@ export async function createInstance(ctx) {
 
     // ---------- lifecycle ----------
 
+    const historyReconcileTimer = setInterval(() => {
+        void reconcileHistoryClear({ push: true }).catch((error) => {
+            ctx.log?.(`skimdown history reconciliation failed: ${error?.message || error}`);
+        });
+    }, 5000);
+    historyReconcileTimer.unref?.();
+
     async function dispose() {
         registryEvents.off("changed", onRegistryChanged);
+        clearInterval(historyReconcileTimer);
         watcher.dispose();
         for (const client of sseClients) {
             try {
