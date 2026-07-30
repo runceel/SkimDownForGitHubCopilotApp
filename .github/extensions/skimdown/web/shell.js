@@ -36,6 +36,7 @@
         btnToggleSidebar: document.getElementById("btn-toggle-sidebar"),
         docTitle: document.getElementById("doc-title"),
         docSubtitle: document.getElementById("doc-subtitle"),
+        btnOpenBrowser: document.getElementById("btn-open-browser"),
         btnFind: document.getElementById("btn-find"),
         btnZoomIn: document.getElementById("btn-zoom-in"),
         btnZoomOut: document.getElementById("btn-zoom-out"),
@@ -1354,6 +1355,14 @@
 
     el.btnToggleSidebar.addEventListener("click", function () {
         saveSettings({ sidebarVisible: !state.settings.sidebarVisible }, true);
+    });
+
+    el.btnOpenBrowser.addEventListener("click", function () {
+        api("/api/open-browser", {})
+            .then(function (result) {
+                if (!result.ok) showToast(result.error || "ブラウザーで開けませんでした");
+            })
+            .catch(showError);
     });
 
     el.btnFind.addEventListener("click", function () {
