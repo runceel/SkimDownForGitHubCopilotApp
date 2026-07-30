@@ -51,18 +51,40 @@ test("loopback API enforces instance and browser request boundaries", { concurre
         assert.equal(JSON.parse(response.body).instanceId, "security-test");
     });
 
-    await t.test("accepts an authenticated SSE connection", async () => {
+    // Real browsers do not send `Origin` on the same-origin `EventSource` GET,
+    // so the accepted case has to be exercised without one.
+    await t.test("accepts an authenticated SSE connection without an Origin", async () => {
         const response = await readEventStream(
             port,
             `/events?token=${encodeURIComponent(token)}`,
             {
                 Host: `127.0.0.1:${port}`,
-                Origin: origin,
                 "Sec-Fetch-Site": "same-origin",
             },
         );
         assert.equal(response.status, 200);
         assert.match(response.body, /event: state/);
+    });
+
+    await t.test("rejects an SSE connection from a foreign Origin", async () => {
+        const response = await readEventStream(
+            port,
+            `/events?token=${encodeURIComponent(token)}`,
+            {
+                Host: `127.0.0.1:${port}`,
+                Origin: "https://attacker.example",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        );
+        assert.equal(response.status, 403);
+    });
+
+    await t.test("rejects an SSE connection without a capability", async () => {
+        const response = await readEventStream(port, "/events", {
+            Host: `127.0.0.1:${port}`,
+            "Sec-Fetch-Site": "same-origin",
+        });
+        assert.equal(response.status, 401);
     });
 
     await t.test("rejects a missing capability", async () => {
@@ -154,12 +176,20 @@ function readEventStream(port, requestPath, headers) {
             { host: "127.0.0.1", port, path: requestPath, method: "GET", headers },
             (res) => {
                 let body = "";
-                res.on("data", (chunk) => {
-                    body += chunk.toString("utf8");
-                    if (!body.includes("event: state")) return;
+                let settled = false;
+                const settle = () => {
+                    if (settled) return;
+                    settled = true;
                     resolve({ status: res.statusCode, body });
                     res.destroy();
+                };
+                res.on("data", (chunk) => {
+                    body += chunk.toString("utf8");
+                    // A rejected stream never emits an event, so also settle on
+                    // `end` rather than waiting for one that will not arrive.
+                    if (body.includes("event: state")) settle();
                 });
+                res.on("end", settle);
             },
         );
         req.on("error", reject);

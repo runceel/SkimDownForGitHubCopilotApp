@@ -25,7 +25,10 @@ API とイベントストリームに必須とする。capability は永続化�
 アセット origin は、capability に加えて次の境界をすべて検証する。
 
 - 宛先 Host は、起動した server の loopback address と port に完全一致する。
-- ブラウザーが報告する Origin と Fetch Metadata は同一 origin の要求を示す。
+- Fetch Metadata は同一 origin の要求を示し、ブラウザーが Origin を送る場合は
+  その値もインスタンスの origin に一致する。ブラウザーは同一 origin の GET
+  （イベントストリームの `EventSource` を含む）に Origin を付けないため、読み取り要求で
+  Origin の存在自体は要求しない。
 - 状態を変更する要求は JSON に限定し、simple request による CSRF を許さない。
 
 ローカルファイル操作は、workspace、セッション成果物、セッション一覧へ登録された文書、

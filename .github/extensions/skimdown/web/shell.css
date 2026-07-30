@@ -2,13 +2,40 @@
  *
  * Chrome around the preview: source picker, file list, toolbar, find bar.
  * The Markdown itself is rendered by the nested renderer iframe, which owns
- * skimdown.css. Everything here is driven by the host's canvas theme tokens so
- * the chrome matches the rest of the app; the preview is themed separately by
- * mapping those same tokens onto SkimDown's --skim-* variables.
+ * skimdown.css. Colors here prefer the host's canvas theme tokens and fall back
+ * to the shell's own palette below; the preview is themed separately by mapping
+ * the same tone onto SkimDown's --skim-* variables.
  */
 
 * {
     box-sizing: border-box;
+}
+
+/* Theme stand-ins.
+ *
+ * The chrome is painted from the host's canvas theme tokens, but the shell is
+ * served from its own loopback origin and custom properties never cross a
+ * document boundary, so in practice those tokens are absent and every
+ * `var(--host-token, …)` below lands on its fallback. Routing the fallbacks
+ * through `light-dark()` keeps the chrome in step with the preview: it resolves
+ * against the root `color-scheme`, which follows the WebView before scripting
+ * runs and is then pinned by shell.js to the same tone it sends the renderer.
+ * A host token, should one ever be injected, still wins.
+ */
+:root {
+    color-scheme: light dark;
+    --shell-bg: light-dark(#ffffff, #0d1117);
+    --shell-fg: light-dark(#1f2328, #e6edf3);
+    --shell-muted: light-dark(#59636e, #9198a1);
+    --shell-border: light-dark(#d0d7de, #30363d);
+    --shell-accent: light-dark(#0969da, #4493f8);
+    --shell-accent-weak: light-dark(rgb(9 105 218 / 8%), rgb(68 147 248 / 10%));
+    --shell-accent-mid: light-dark(rgb(9 105 218 / 10%), rgb(68 147 248 / 14%));
+    --shell-accent-strong: light-dark(rgb(9 105 218 / 14%), rgb(68 147 248 / 22%));
+    --shell-danger: light-dark(#cf222e, #f85149);
+    --shell-danger-muted: light-dark(#ffebe9, rgb(248 81 73 / 15%));
+    --shell-warning: light-dark(#d4a72c, #d29922);
+    --shell-warning-muted: light-dark(#fff8c5, rgb(210 153 34 / 15%));
 }
 
 html,
@@ -19,8 +46,8 @@ body {
 }
 
 body {
-    background: var(--background-color-default, #ffffff);
-    color: var(--text-color-default, #1f2328);
+    background: var(--background-color-default, var(--shell-bg));
+    color: var(--text-color-default, var(--shell-fg));
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
     font-size: var(--text-body-medium, 14px);
     line-height: var(--leading-body-medium, 1.43);
@@ -56,13 +83,13 @@ body[data-sidebar="hidden"] #resizer {
     min-width: 160px;
     max-width: 520px;
     min-height: 0;
-    border-right: 1px solid var(--border-color-default, #d0d7de);
-    background: var(--background-color-default, #ffffff);
+    border-right: 1px solid var(--border-color-default, var(--shell-border));
+    background: var(--background-color-default, var(--shell-bg));
 }
 
 body[data-sidebar-position="right"] #sidebar {
     border-right: 0;
-    border-left: 1px solid var(--border-color-default, #d0d7de);
+    border-left: 1px solid var(--border-color-default, var(--shell-border));
 }
 
 .sidebar-head {
@@ -70,7 +97,7 @@ body[data-sidebar-position="right"] #sidebar {
     flex-direction: column;
     gap: 6px;
     padding: 8px;
-    border-bottom: 1px solid var(--border-color-default, #d0d7de);
+    border-bottom: 1px solid var(--border-color-default, var(--shell-border));
 }
 
 .sidebar-row {
@@ -83,15 +110,15 @@ body[data-sidebar-position="right"] #sidebar {
     flex: 1 1 auto;
     min-width: 0;
     padding: 4px 22px 4px 6px;
-    border: 1px solid var(--border-color-default, #d0d7de);
+    border: 1px solid var(--border-color-default, var(--shell-border));
     border-radius: 6px;
-    background-color: var(--background-color-default, #ffffff);
+    background-color: var(--background-color-default, var(--shell-bg));
     background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
         linear-gradient(135deg, currentColor 50%, transparent 50%);
     background-position: right 11px center, right 6px center;
     background-size: 5px 5px, 5px 5px;
     background-repeat: no-repeat;
-    color: var(--text-color-default, #1f2328);
+    color: var(--text-color-default, var(--shell-fg));
     font: inherit;
     appearance: none;
     -webkit-appearance: none;
@@ -100,10 +127,10 @@ body[data-sidebar-position="right"] #sidebar {
 #filter {
     width: 100%;
     padding: 4px 8px;
-    border: 1px solid var(--border-color-default, #d0d7de);
+    border: 1px solid var(--border-color-default, var(--shell-border));
     border-radius: 6px;
-    background: var(--background-color-default, #ffffff);
-    color: var(--text-color-default, #1f2328);
+    background: var(--background-color-default, var(--shell-bg));
+    color: var(--text-color-default, var(--shell-fg));
     font: inherit;
 }
 
@@ -120,8 +147,8 @@ body[data-sidebar-position="right"] #sidebar {
     justify-content: space-between;
     gap: 6px;
     padding: 6px 8px;
-    border-top: 1px solid var(--border-color-default, #d0d7de);
-    color: var(--text-color-muted, #59636e);
+    border-top: 1px solid var(--border-color-default, var(--shell-border));
+    color: var(--text-color-muted, var(--shell-muted));
     font-size: 0.85em;
 }
 
@@ -133,7 +160,7 @@ body[data-sidebar-position="right"] #sidebar {
 
 .group-label {
     padding: 10px 10px 4px;
-    color: var(--text-color-muted, #59636e);
+    color: var(--text-color-muted, var(--shell-muted));
     font-size: 0.78em;
     font-weight: var(--font-weight-semibold, 600);
     letter-spacing: 0.02em;
@@ -156,23 +183,23 @@ body[data-sidebar-position="right"] #sidebar {
 }
 
 .node:hover {
-    background: var(--true-color-blue-muted, rgba(9, 105, 218, 0.08));
+    background: var(--true-color-blue-muted, var(--shell-accent-weak));
 }
 
 .node:focus-visible {
-    outline: 2px solid var(--color-focus-outline, #0969da);
+    outline: 2px solid var(--color-focus-outline, var(--shell-accent));
     outline-offset: -2px;
 }
 
 .node[aria-current="true"] {
-    background: var(--true-color-blue-muted, rgba(9, 105, 218, 0.14));
+    background: var(--true-color-blue-muted, var(--shell-accent-strong));
     font-weight: var(--font-weight-semibold, 600);
 }
 
 .node .twisty {
     flex: 0 0 auto;
     width: 14px;
-    color: var(--text-color-muted, #59636e);
+    color: var(--text-color-muted, var(--shell-muted));
     text-align: center;
     font-size: 0.75em;
     line-height: 1;
@@ -189,7 +216,7 @@ body[data-sidebar-position="right"] #sidebar {
 .node .meta {
     flex: 0 1 auto;
     overflow: hidden;
-    color: var(--text-color-muted, #59636e);
+    color: var(--text-color-muted, var(--shell-muted));
     font-size: 0.78em;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -198,7 +225,7 @@ body[data-sidebar-position="right"] #sidebar {
 .node .sub {
     display: block;
     overflow: hidden;
-    color: var(--text-color-muted, #59636e);
+    color: var(--text-color-muted, var(--shell-muted));
     font-size: 0.78em;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -210,7 +237,7 @@ body[data-sidebar-position="right"] #sidebar {
 
 .empty-note {
     padding: 16px 12px;
-    color: var(--text-color-muted, #59636e);
+    color: var(--text-color-muted, var(--shell-muted));
     font-size: 0.9em;
 }
 
@@ -227,7 +254,7 @@ body[data-sidebar-position="right"] #sidebar {
 
 #resizer:hover,
 #resizer.dragging {
-    background: var(--true-color-blue, #0969da);
+    background: var(--true-color-blue, var(--shell-accent));
 }
 
 /* ---------- main ---------- */
@@ -245,7 +272,7 @@ body[data-sidebar-position="right"] #sidebar {
     align-items: center;
     gap: 6px;
     padding: 6px 8px;
-    border-bottom: 1px solid var(--border-color-default, #d0d7de);
+    border-bottom: 1px solid var(--border-color-default, var(--shell-border));
 }
 
 #title-box {
@@ -262,7 +289,7 @@ body[data-sidebar-position="right"] #sidebar {
 
 #doc-subtitle {
     overflow: hidden;
-    color: var(--text-color-muted, #59636e);
+    color: var(--text-color-muted, var(--shell-muted));
     font-size: 0.78em;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -292,17 +319,17 @@ body[data-sidebar-position="right"] #sidebar {
 }
 
 .icon-button:hover {
-    background: var(--true-color-blue-muted, rgba(9, 105, 218, 0.1));
+    background: var(--true-color-blue-muted, var(--shell-accent-mid));
 }
 
 .icon-button:focus-visible {
-    outline: 2px solid var(--color-focus-outline, #0969da);
+    outline: 2px solid var(--color-focus-outline, var(--shell-accent));
     outline-offset: -1px;
 }
 
 .icon-button[aria-pressed="true"] {
-    border-color: var(--border-color-default, #d0d7de);
-    background: var(--true-color-blue-muted, rgba(9, 105, 218, 0.14));
+    border-color: var(--border-color-default, var(--shell-border));
+    background: var(--true-color-blue-muted, var(--shell-accent-strong));
 }
 
 .icon-button svg {
@@ -318,8 +345,8 @@ body[data-sidebar-position="right"] #sidebar {
     align-items: center;
     gap: 6px;
     padding: 6px 8px;
-    border-bottom: 1px solid var(--border-color-default, #d0d7de);
-    background: var(--background-color-default, #ffffff);
+    border-bottom: 1px solid var(--border-color-default, var(--shell-border));
+    background: var(--background-color-default, var(--shell-bg));
 }
 
 .bar[hidden] {
@@ -327,13 +354,13 @@ body[data-sidebar-position="right"] #sidebar {
 }
 
 #deadbar {
-    background: var(--true-color-red-muted, #ffebe9);
-    border-bottom-color: var(--true-color-red, #cf222e);
+    background: var(--true-color-red-muted, var(--shell-danger-muted));
+    border-bottom-color: var(--true-color-red, var(--shell-danger));
 }
 
 .privacy-bar {
-    background: var(--true-color-yellow-muted, #fff8c5);
-    border-bottom-color: var(--true-color-yellow, #d4a72c);
+    background: var(--true-color-yellow-muted, var(--shell-warning-muted));
+    border-bottom-color: var(--true-color-yellow, var(--shell-warning));
 }
 
 .bar input[type="search"],
@@ -341,17 +368,17 @@ body[data-sidebar-position="right"] #sidebar {
     flex: 1 1 auto;
     min-width: 0;
     padding: 4px 8px;
-    border: 1px solid var(--border-color-default, #d0d7de);
+    border: 1px solid var(--border-color-default, var(--shell-border));
     border-radius: 6px;
-    background: var(--background-color-default, #ffffff);
-    color: var(--text-color-default, #1f2328);
+    background: var(--background-color-default, var(--shell-bg));
+    color: var(--text-color-default, var(--shell-fg));
     font: inherit;
 }
 
 .bar .count {
     flex: 0 0 auto;
     min-width: 4.5em;
-    color: var(--text-color-muted, #59636e);
+    color: var(--text-color-muted, var(--shell-muted));
     font-size: 0.85em;
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -367,7 +394,7 @@ body[data-sidebar-position="right"] #sidebar {
 .text-button {
     flex: 0 0 auto;
     padding: 4px 10px;
-    border: 1px solid var(--border-color-default, #d0d7de);
+    border: 1px solid var(--border-color-default, var(--shell-border));
     border-radius: 6px;
     background: transparent;
     color: inherit;
@@ -377,7 +404,7 @@ body[data-sidebar-position="right"] #sidebar {
 }
 
 .text-button:hover {
-    background: var(--true-color-blue-muted, rgba(9, 105, 218, 0.1));
+    background: var(--true-color-blue-muted, var(--shell-accent-mid));
 }
 
 /* ---------- privacy dialog ---------- */
@@ -385,10 +412,10 @@ body[data-sidebar-position="right"] #sidebar {
 #privacy-dialog {
     width: min(520px, calc(100vw - 32px));
     padding: 0;
-    border: 1px solid var(--border-color-default, #d0d7de);
+    border: 1px solid var(--border-color-default, var(--shell-border));
     border-radius: 10px;
-    background: var(--background-color-default, #ffffff);
-    color: var(--text-color-default, #1f2328);
+    background: var(--background-color-default, var(--shell-bg));
+    color: var(--text-color-default, var(--shell-fg));
     box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
     font: inherit;
 }
@@ -402,7 +429,7 @@ body[data-sidebar-position="right"] #sidebar {
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
-    border-bottom: 1px solid var(--border-color-default, #d0d7de);
+    border-bottom: 1px solid var(--border-color-default, var(--shell-border));
 }
 
 .dialog-head h2 {
@@ -433,16 +460,16 @@ body[data-sidebar-position="right"] #sidebar {
 
 .setting-row small,
 .privacy-note {
-    color: var(--text-color-muted, #59636e);
+    color: var(--text-color-muted, var(--shell-muted));
     font-size: 0.82em;
 }
 
 .setting-row select {
     min-width: 88px;
     padding: 4px 6px;
-    border: 1px solid var(--border-color-default, #d0d7de);
+    border: 1px solid var(--border-color-default, var(--shell-border));
     border-radius: 6px;
-    background: var(--background-color-default, #ffffff);
+    background: var(--background-color-default, var(--shell-bg));
     color: inherit;
     font: inherit;
 }
@@ -461,16 +488,16 @@ body[data-sidebar-position="right"] #sidebar {
     flex-wrap: wrap;
     gap: 8px;
     padding-top: 12px;
-    border-top: 1px solid var(--border-color-default, #d0d7de);
+    border-top: 1px solid var(--border-color-default, var(--shell-border));
 }
 
 .danger-button {
-    border-color: var(--true-color-red, #cf222e);
-    color: var(--true-color-red, #cf222e);
+    border-color: var(--true-color-red, var(--shell-danger));
+    color: var(--true-color-red, var(--shell-danger));
 }
 
 .danger-button:hover {
-    background: var(--true-color-red-muted, #ffebe9);
+    background: var(--true-color-red-muted, var(--shell-danger-muted));
 }
 
 /* ---------- preview ---------- */
@@ -495,8 +522,8 @@ body[data-sidebar-position="right"] #sidebar {
     align-items: center;
     justify-content: center;
     padding: 24px;
-    background: var(--background-color-default, #ffffff);
-    color: var(--text-color-muted, #59636e);
+    background: var(--background-color-default, var(--shell-bg));
+    color: var(--text-color-muted, var(--shell-muted));
     text-align: center;
 }
 
@@ -513,9 +540,9 @@ body[data-sidebar-position="right"] #sidebar {
     z-index: 10;
     max-width: 70%;
     padding: 8px 12px;
-    border: 1px solid var(--border-color-default, #d0d7de);
+    border: 1px solid var(--border-color-default, var(--shell-border));
     border-radius: 8px;
-    background: var(--background-color-default, #ffffff);
+    background: var(--background-color-default, var(--shell-bg));
     box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
     font-size: 0.85em;
 }
