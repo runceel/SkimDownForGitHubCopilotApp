@@ -44,7 +44,8 @@ ADR は、SkimDown canvas 拡張の**全体アーキテクチャに関する判�
 | ADR | Status | 判断 |
 | --- | --- | --- |
 | [0001](0001-vendor-upstream-renderer-behind-a-compatibility-layer.md) | Accepted | 上流 renderer を変更せず、互換レイヤーの背後で利用する |
-| [0002](0002-separate-ui-and-content-trust-boundaries.md) | Accepted | UI の責務分離とコンテンツの信頼境界を、frame と 2 origin で表す |
-| [0003](0003-use-state-based-same-origin-renderer-communication.md) | Accepted | renderer との合意を、同一 origin の状態確認を主経路にする |
+| [0002](0002-separate-ui-and-content-trust-boundaries.md) | Superseded | UI の責務分離とコンテンツの信頼境界を、frame と 2 origin で表す |
+| [0003](0003-use-state-based-same-origin-renderer-communication.md) | Superseded | renderer との合意を、同一 origin の状態確認を主経路にする |
 | [0004](0004-persist-bounded-renderer-diagnostics.md) | Accepted | renderer 診断を上限付き成果物として永続化する |
 | [0005](0005-scope-persistent-state-by-user-session-and-document.md) | Accepted | 永続状態をユーザー、セッション、文書の同一性で分ける |
+| [0006](0006-isolate-renderer-origin-and-capabilities.md) | Accepted | renderer を sandbox と専用 origin へ隔離し、通信と資源取得を最小権限にする |

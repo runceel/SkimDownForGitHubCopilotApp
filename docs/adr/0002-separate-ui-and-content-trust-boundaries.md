@@ -1,9 +1,9 @@
 # 0002: UI の責務分離とコンテンツの信頼境界を frame と 2 origin で表す
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-07-30
 - Supersedes: なし
-- Superseded by: なし
+- Superseded by: [0006](0006-isolate-renderer-origin-and-capabilities.md)
 
 ## Context
 

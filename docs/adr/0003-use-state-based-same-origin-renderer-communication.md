@@ -1,9 +1,9 @@
 # 0003: renderer との合意を同一 origin の状態確認を主経路にする
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-07-30
 - Supersedes: なし
-- Superseded by: なし
+- Superseded by: [0006](0006-isolate-renderer-origin-and-capabilities.md)
 
 ## Context
 

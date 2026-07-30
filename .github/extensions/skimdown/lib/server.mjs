@@ -1,10 +1,11 @@
 /* Per-instance loopback servers for one open SkimDown canvas.
  *
- * Two servers, i.e. two origins, mirroring SkimDown for Windows' WebView2
- * split: renderer assets never share an origin with the user's own content.
+ * Three servers keep privileged shell APIs, untrusted Markdown rendering, and
+ * document media in separate origins.
  *
- *   asset origin   http://127.0.0.1:<a>/   shell + renderer + vendor + /api + SSE
- *   content origin http://127.0.0.1:<b>/   images referenced from the open document
+ *   asset origin    http://127.0.0.1:<a>/   shell + /api + SSE
+ *   renderer origin http://127.0.0.1:<b>/   renderer + vendor assets only
+ *   content origin  http://127.0.0.1:<c>/   images referenced from the open document
  *
  * Only loopback is bound, because the host embeds loopback URLs only.
  */
@@ -66,6 +67,8 @@ const CONTENT_TYPES = new Map(Object.entries({
     ".apng": "image/apng",
 }));
 
+const SHELL_ASSETS = new Set(["shell.html", "shell.css", "shell.js"]);
+const RENDERER_ASSETS = new Set(["renderer.html", "bridge.js", "renderer.js", "skimdown.css"]);
 const SSE_KEEPALIVE_MS = 25000;
 
 /**
@@ -107,6 +110,14 @@ export async function createInstance(ctx) {
     const contentPort = portOf(contentServer);
     const contentBaseUri = `http://127.0.0.1:${contentPort}/`;
 
+    let assetBaseUri = "";
+    const rendererServer = createServer((req, res) => {
+        void handleRendererRequest(req, res).catch(() => endWithStatus(res, 500, "renderer error"));
+    });
+    await listen(rendererServer);
+    const rendererPort = portOf(rendererServer);
+    const rendererBaseUri = `http://127.0.0.1:${rendererPort}/`;
+
     const assetServer = createServer((req, res) => {
         void handleAssetRequest(req, res).catch((error) => {
             ctx.log?.(`skimdown request failed: ${error?.message || error}`);
@@ -115,7 +126,8 @@ export async function createInstance(ctx) {
     });
     await listen(assetServer);
     const assetPort = portOf(assetServer);
-    const url = `http://127.0.0.1:${assetPort}/`;
+    assetBaseUri = `http://127.0.0.1:${assetPort}/`;
+    const url = assetBaseUri;
 
     // ---------- state helpers ----------
 
@@ -170,6 +182,7 @@ export async function createInstance(ctx) {
             sources,
             notice: state.notice,
             contentBaseUri,
+            rendererBaseUri,
         };
     }
 
@@ -369,12 +382,19 @@ export async function createInstance(ctx) {
     // ---------- HTTP: asset origin ----------
 
     async function handleAssetRequest(req, res) {
+        applySecurityHeaders(res, {
+            csp: shellCsp(rendererBaseUri),
+            corp: "same-origin",
+        });
         const parsed = new URL(req.url || "/", "http://127.0.0.1");
         const pathname = decodeURIComponent(parsed.pathname);
 
         if (pathname === "/events") return handleSse(res);
         if (pathname.startsWith("/api/")) return handleApi(req, res, pathname, parsed);
-        return handleStatic(res, pathname);
+        if (req.method !== "GET" && req.method !== "HEAD") {
+            return endWithStatus(res, 405, "method not allowed");
+        }
+        return handleStatic(req, res, pathname, "shell");
     }
 
     function handleSse(res) {
@@ -515,7 +535,22 @@ export async function createInstance(ctx) {
         return { kind: "missing", path: target };
     }
 
-    async function handleStatic(res, pathname) {
+    // ---------- HTTP: renderer origin ----------
+
+    async function handleRendererRequest(req, res) {
+        applySecurityHeaders(res, {
+            csp: rendererCsp(assetBaseUri, contentBaseUri),
+            corp: "same-site",
+        });
+        if (req.method !== "GET" && req.method !== "HEAD") {
+            return endWithStatus(res, 405, "method not allowed");
+        }
+        const parsed = new URL(req.url || "/", "http://127.0.0.1");
+        const pathname = decodeURIComponent(parsed.pathname);
+        return handleStatic(req, res, pathname, "renderer");
+    }
+
+    async function handleStatic(req, res, pathname, role) {
         // The embedding chrome asks for a favicon that a canvas never has; answer
         // quietly rather than logging a 404 into the user's console.
         if (pathname === "/favicon.ico") {
@@ -523,7 +558,9 @@ export async function createInstance(ctx) {
             return;
         }
 
-        const relative = pathname === "/" ? "shell.html" : pathname.replace(/^\/+/, "");
+        const defaultPage = role === "shell" ? "shell.html" : "renderer.html";
+        const relative = pathname === "/" ? defaultPage : pathname.replace(/^\/+/, "");
+        if (!isAllowedStaticAsset(role, relative)) return endWithStatus(res, 404, "not found");
         const resolved = path.resolve(WEB_DIR, relative);
         if (!isInside(WEB_DIR, resolved)) return endWithStatus(res, 403, "forbidden");
 
@@ -539,12 +576,16 @@ export async function createInstance(ctx) {
             "Content-Type": type,
             "Cache-Control": "no-store",
         });
-        res.end(data);
+        res.end(req.method === "HEAD" ? undefined : data);
     }
 
     // ---------- HTTP: content origin ----------
 
     async function handleContentRequest(req, res) {
+        applySecurityHeaders(res, {
+            csp: "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; object-src 'none'; sandbox",
+            corp: "same-site",
+        });
         if (req.method !== "GET" && req.method !== "HEAD") {
             return endWithStatus(res, 405, "method not allowed");
         }
@@ -571,7 +612,6 @@ export async function createInstance(ctx) {
         res.writeHead(200, {
             "Content-Type": type,
             "Cache-Control": "no-store",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
         });
         res.end(req.method === "HEAD" ? undefined : data);
     }
@@ -589,7 +629,11 @@ export async function createInstance(ctx) {
             }
         }
         sseClients.clear();
-        await Promise.all([closeServer(assetServer), closeServer(contentServer)]);
+        await Promise.all([
+            closeServer(assetServer),
+            closeServer(rendererServer),
+            closeServer(contentServer),
+        ]);
     }
 
     // ---------- initial state ----------
@@ -622,6 +666,7 @@ export async function createInstance(ctx) {
     return {
         url,
         assetPort,
+        rendererPort,
         contentPort,
         state,
         setSource,
@@ -667,6 +712,53 @@ function displayPath(target) {
 function isInside(root, candidate) {
     const rel = path.relative(path.resolve(root), candidate);
     return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+function isAllowedStaticAsset(role, relative) {
+    const normalized = relative.replaceAll("\\", "/");
+    if (role === "shell") return SHELL_ASSETS.has(normalized);
+    return RENDERER_ASSETS.has(normalized) || normalized.startsWith("vendor/");
+}
+
+function originOf(baseUri) {
+    return new URL(baseUri).origin;
+}
+
+function shellCsp(rendererBaseUri) {
+    return [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "connect-src 'self'",
+        `frame-src ${originOf(rendererBaseUri)}`,
+        "base-uri 'none'",
+        "form-action 'none'",
+        "object-src 'none'",
+    ].join("; ");
+}
+
+function rendererCsp(assetBaseUri, contentBaseUri) {
+    return [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self'",
+        `img-src 'self' data: ${originOf(contentBaseUri)}`,
+        "connect-src 'none'",
+        "frame-src 'none'",
+        "worker-src 'none'",
+        `frame-ancestors ${originOf(assetBaseUri)}`,
+        "base-uri 'none'",
+        "form-action 'none'",
+        "object-src 'none'",
+    ].join("; ");
+}
+
+function applySecurityHeaders(res, { csp, corp }) {
+    res.setHeader("Content-Security-Policy", csp);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cross-Origin-Resource-Policy", corp);
+    res.setHeader("Referrer-Policy", "no-referrer");
 }
 
 function openExternal(href) {
