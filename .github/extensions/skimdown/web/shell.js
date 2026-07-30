@@ -74,6 +74,7 @@
         expandedRoot: null,
         search: { query: "", caseSensitive: false },
         pendingExternalHref: null,
+        rendererOrigin: null,
         rendererReady: false,
         rendererQueue: [],
         visibleNodes: [],      // flat list of focusable sidebar buttons
@@ -81,26 +82,60 @@
 
     // ---------- renderer messaging ----------
 
-    /* `renderer.html` is loaded from a relative URL, so the preview frame is
-     * always same-origin and the two documents can call each other directly.
-     * That is strictly more reliable than `postMessage` — no listener-timing
-     * race, no `targetOrigin` mismatch, nothing to lose during a frame swap —
-     * so it is the primary transport and `postMessage` is only the fallback
-     * for the (unexpected) case where the bridge handle is unreachable. */
+    var HANDSHAKE_GRACE_MS = 6000;
+    var HANDSHAKE_POLL_MS = 250;
+    var RENDERER_SHORTCUTS = new Set([
+        "find",
+        "find-next",
+        "find-prev",
+        "use-selection-for-find",
+        "toggle-sidebar",
+        "zoom-in",
+        "zoom-out",
+        "zoom-reset",
+        "content-width-wider",
+        "content-width-narrower",
+        "select-all",
+        "open-folder",
+    ]);
+    var handshakeTimer = 0;
+    var handshakePoll = 0;
+    var handshakeRetried = false;
+    var rendererLogs = [];
+
+    function ensureRendererFrame(baseUri) {
+        var url;
+        try {
+            url = new URL("renderer.html", String(baseUri || ""));
+            if (url.protocol !== "http:" || url.hostname !== "127.0.0.1") {
+                throw new Error("renderer origin must be loopback HTTP");
+            }
+            if (url.origin === window.location.origin) {
+                throw new Error("renderer origin must differ from shell origin");
+            }
+        } catch (error) {
+            showDeadBar(true, "プレビューの安全な接続先を初期化できませんでした。");
+            reportDiag("renderer-origin-invalid");
+            return false;
+        }
+
+        url.searchParams.set("parentOrigin", window.location.origin);
+        if (state.rendererOrigin === url.origin && el.preview.src === url.href) return true;
+
+        stopHandshakeWatch();
+        state.rendererOrigin = url.origin;
+        state.rendererReady = false;
+        handshakeRetried = false;
+        rendererLogs = [];
+        el.preview.src = url.href;
+        return true;
+    }
+
     function deliverToRenderer(message) {
         var frame = el.preview.contentWindow;
-        if (!frame) return false;
+        if (!frame || !state.rendererOrigin) return false;
         try {
-            var bridge = frame.__skimBridge;
-            if (bridge && typeof bridge.deliver === "function") {
-                bridge.deliver(message);
-                return true;
-            }
-        } catch (e) {
-            // Unreachable handle; try the message channel instead.
-        }
-        try {
-            frame.postMessage({ __skim: true, payload: message }, window.location.origin);
+            frame.postMessage({ __skim: true, payload: message }, state.rendererOrigin);
             return true;
         } catch (e) {
             return false;
@@ -121,89 +156,50 @@
         for (var i = 0; i < queued.length; i++) postToRenderer(queued[i]);
     }
 
-    /* The renderer's half of the direct transport. It has to exist before the
-     * frame boots, hence the assignment at script-evaluation time. */
-    window.__skimShellReceive = function (payload) {
-        handleRendererMessage(payload);
-    };
-
     window.addEventListener("message", function (ev) {
-        if (ev.origin !== window.location.origin) return;
-        if (!ev.data || ev.data.__skim !== true) return;
         if (ev.source !== el.preview.contentWindow) return;
+        if (!state.rendererOrigin || ev.origin !== state.rendererOrigin) return;
+        if (!ev.data || ev.data.__skim !== true) return;
+        if (!isRendererMessage(ev.data.payload)) return;
         handleRendererMessage(ev.data.payload);
     });
 
-    /**
-     * The renderer announces itself with a `ready` post once `renderer.js` has
-     * booted, and everything the shell sends is queued until then — so a lost
-     * or never-sent `ready` leaves the preview permanently blank.
-     *
-     * Rather than trusting that notification to arrive, the shell *asks*: the
-     * frame is same-origin, so `__skimBridge.isReady()` is authoritative and
-     * can be polled. The iframe `load` event fires after deferred scripts run,
-     * so by then a healthy renderer has already answered. Polling past that
-     * only covers a renderer that boots unusually late.
-     */
-    var HANDSHAKE_GRACE_MS = 6000;
-    var HANDSHAKE_POLL_MS = 250;
-    var handshakeTimer = 0;
-    var handshakePoll = 0;
-    var handshakeRetried = false;
-    var rendererLogs = [];
-
-    function rendererBridge() {
-        try {
-            var frame = el.preview.contentWindow;
-            return (frame && frame.__skimBridge) || null;
-        } catch (e) {
-            return null;
+    function isRendererMessage(msg) {
+        if (!msg || typeof msg !== "object") return false;
+        switch (msg.type) {
+            case "ready":
+                return true;
+            case "diagnostic":
+                return !!msg.report && typeof msg.report === "object";
+            case "log":
+                return typeof msg.text === "string" && msg.text.length <= 256;
+            case "link":
+                return typeof msg.href === "string"
+                    && msg.href.length <= 8192
+                    && ["anchor", "external", "relative"].indexOf(msg.kind) >= 0;
+            case "search/result":
+                return Number.isFinite(msg.total) && Number.isFinite(msg.current);
+            case "copy":
+                return typeof msg.text === "string" && msg.text.length <= 2 * 1024 * 1024;
+            case "shortcut":
+                return RENDERER_SHORTCUTS.has(msg.id);
+            case "zoomChanged":
+                return Number.isFinite(msg.factor);
+            default:
+                return false;
         }
     }
 
     function describeRenderer() {
-        var info = { retried: handshakeRetried, logs: rendererLogs.slice(0, 6) };
-        try {
-            var doc = el.preview.contentDocument;
-            if (doc) info.readyState = doc.readyState;
-            if (doc && doc.body) info.bodyChildren = doc.body.children.length;
-            info.hasBridge = !!(el.preview.contentWindow && el.preview.contentWindow.chrome
-                && el.preview.contentWindow.chrome.webview);
-        } catch (e) {
-            info.docError = e.name;
-        }
-        var bridge = rendererBridge();
-        if (bridge) {
-            info.bridge = {
-                version: bridge.version,
-                isReady: bridge.isReady(),
-                install: bridge.install,
-            };
-            try {
-                info.rendererSnapshot = bridge.snapshot("shell-request");
-            } catch (e) {
-                info.snapshotError = e.name;
-            }
-        } else {
-            info.bridge = null;
-        }
-        return info;
+        return {
+            retried: handshakeRetried,
+            logs: rendererLogs.slice(0, 6)
+        };
     }
 
-    /** Short human-readable cause for the dead bar, so a screenshot is enough
-     *  to tell a blocked frame apart from a renderer that crashed on boot. */
     function rendererFailureHint() {
-        var bridge = rendererBridge();
-        if (!bridge) return "レンダラーのスクリプトが読み込まれていません";
-        var install = bridge.install;
-        if (install && install.strategy === "failed") {
-            return "レンダラーとの通信経路を確保できませんでした";
-        }
-        var errors = bridge.errors || [];
-        if (errors.length) return errors[0];
         if (rendererLogs.length) return rendererLogs[0];
-        if (!bridge.isReady()) return "レンダラーの初期化が完了しませんでした";
-        return "";
+        return "レンダラーの初期化が完了しませんでした";
     }
 
     function reportDiag(reason) {
@@ -215,17 +211,6 @@
         api("/api/diag", payload).catch(noop);
     }
 
-    /* The app is itself WebView2-based, so `chrome.webview` already exists in
-     * the renderer frame and the bridge has to displace it. Getting that wrong
-     * is precisely what used to leave the preview blank, and which strategy
-     * won is not observable from the extension process — so record it once per
-     * shell, on success. Logged rather than persisted: this is a note about a
-     * healthy boot, not a fault. */
-    var bridgeInstallReported = false;
-
-    /* Fired unconditionally at shell startup. Without it, a panel still pointing
-     * at a port from a previous extension process is indistinguishable from a
-     * panel that loaded and then failed — both are simply silent. */
     function reportShellBoot() {
         api("/api/diag", {
             reason: "shell-boot",
@@ -234,14 +219,47 @@
         }).catch(noop);
     }
 
-    function reportBridgeInstall() {
-        if (bridgeInstallReported) return;
-        var bridge = rendererBridge();
-        var install = bridge && bridge.install;
-        if (!install) return;
-        bridgeInstallReported = true;
-        api("/api/diag", { reason: "bridge-installed", from: "shell", install: install })
-            .catch(noop);
+    function boundedText(value, length) {
+        return typeof value === "string" ? value.slice(0, length) : "";
+    }
+
+    function reportRendererDiagnostic(report) {
+        var errors = Array.isArray(report.errors)
+            ? report.errors.slice(0, 8).map(function (value) { return boundedText(value, 256); })
+            : [];
+        for (var i = 0; i < errors.length; i++) recordRendererLog(errors[i], false);
+
+        var install = report.install && typeof report.install === "object"
+            ? {
+                strategy: boundedText(report.install.strategy, 80),
+                failures: Array.isArray(report.install.failures)
+                    ? report.install.failures.slice(0, 8).map(function (value) {
+                        return boundedText(value, 256);
+                    })
+                    : [],
+            }
+            : null;
+        var vendors = report.vendors && typeof report.vendors === "object"
+            ? {
+                markdownit: boundedText(report.vendors.markdownit, 40),
+                hljs: boundedText(report.vendors.hljs, 40),
+                DOMPurify: boundedText(report.vendors.DOMPurify, 40),
+                katex: boundedText(report.vendors.katex, 40),
+                mermaid: boundedText(report.vendors.mermaid, 40),
+            }
+            : null;
+        api("/api/diag", {
+            reason: boundedText(report.reason, 80) || "renderer-diagnostic",
+            from: "renderer",
+            readySent: !!report.readySent,
+            listeners: Number.isFinite(report.listeners) ? report.listeners : null,
+            readyState: boundedText(report.readyState, 40),
+            bodyChildren: Number.isFinite(report.bodyChildren) ? report.bodyChildren : null,
+            contentChildren: Number.isFinite(report.contentChildren) ? report.contentChildren : null,
+            vendors: vendors,
+            install: install,
+            errors: errors,
+        }).catch(noop);
     }
 
     function stopHandshakeWatch() {
@@ -255,31 +273,17 @@
         }
     }
 
-    /** Adopt a renderer that booted without us hearing about it. */
-    function adoptReadyRenderer() {
-        if (state.rendererReady) return true;
-        var bridge = rendererBridge();
-        if (!bridge || !bridge.isReady()) return false;
-        handleRendererMessage({ type: "ready" });
-        return true;
-    }
-
     function watchHandshake() {
         stopHandshakeWatch();
         handshakePoll = setInterval(function () {
-            if (adoptReadyRenderer()) stopHandshakeWatch();
+            postDirect({ type: "hello" });
         }, HANDSHAKE_POLL_MS);
         handshakeTimer = setTimeout(function () {
-            if (adoptReadyRenderer()) {
-                stopHandshakeWatch();
-                return;
-            }
+            if (state.rendererReady) return;
             if (!handshakeRetried) {
                 handshakeRetried = true;
                 reportDiag("handshake-timeout-retrying");
-                // Force a fresh renderer document; a transient asset failure
-                // during the first boot is worth exactly one retry.
-                el.preview.src = el.preview.getAttribute("src");
+                el.preview.src = el.preview.src;
                 watchHandshake();
                 return;
             }
@@ -293,46 +297,38 @@
     }
 
     el.preview.addEventListener("load", function () {
-        if (state.rendererReady) return;
-        // `load` fires after the deferred renderer script has run, so a healthy
-        // frame can be adopted immediately without any message at all.
-        if (adoptReadyRenderer()) return;
-        // Otherwise prompt (in case `ready` was posted before this shell was
-        // listening) and keep watching.
+        if (!state.rendererOrigin || state.rendererReady) return;
         postDirect({ type: "hello" });
         watchHandshake();
     });
 
-    /** Post without the ready gate — used to re-drive the handshake itself. */
     function postDirect(message) {
         deliverToRenderer(message);
     }
 
-    function recordRendererLog(text) {
+    function recordRendererLog(text, persist) {
         var line = String(text == null ? "" : text).slice(0, 256);
         if (!line) return;
         if (rendererLogs.indexOf(line) < 0) rendererLogs.push(line);
         if (rendererLogs.length > 12) rendererLogs.shift();
-        reportDiag("renderer-log");
+        if (persist !== false) reportDiag("renderer-log");
     }
 
     function handleRendererMessage(msg) {
-        if (!msg || typeof msg !== "object") return;
         switch (msg.type) {
             case "ready":
                 state.rendererReady = true;
                 stopHandshakeWatch();
                 showDeadBar(false);
-                reportBridgeInstall();
                 pushThemeToRenderer();
                 pushSettingsToRenderer();
                 flushRendererQueue();
                 if (state.doc) pushDocToRenderer(state.doc);
                 break;
+            case "diagnostic":
+                reportRendererDiagnostic(msg.report);
+                break;
             case "log":
-                // renderer.js reports its own uncaught errors here. The WinUI
-                // host wrote them to its debug log; dropping them on the floor
-                // is how a boot failure turns into an unexplained blank pane.
                 recordRendererLog(msg.text);
                 break;
             case "link":
@@ -662,6 +658,7 @@
 
     function applyServerState(payload) {
         state.server = payload;
+        if (!ensureRendererFrame(payload.rendererBaseUri)) return;
         if (payload.settings) {
             var settingsChanged = !state.settings;
             state.settings = payload.settings;
