@@ -75,6 +75,8 @@ flowchart TB
 renderer のコードは信頼された上流資産だが、入力される Markdown は信頼しない。
 Markdown 由来の HTML は renderer のサニタイズ処理を経由し、ローカルメディアは
 特権を持つアセット origin から配信しない。この区別を崩してはならない。
+サニタイズは inert な DOM 上で完了させ、URL 解決を含む後処理にも未サニタイズの node を
+渡さない。サニタイザーを利用できない場合は、Markdown を表示せず fail closed とする。
 
 ## ライフサイクル
 
@@ -149,9 +151,10 @@ ephemeral であり、再接続後の調査には残らない。
 
 ## 実装者が守る不変条件
 
-1. `renderer.js`、`skimdown.css`、`vendor/**` は、採用した
-   SkimDownForWindows の上流リビジョンからのバイト単位コピーとする。手で編集しない。
-   変更が必要なら上流を修正し、上流リビジョンを更新して再コピーする。
+1. `skimdown.css`、`vendor/**` は、採用した SkimDownForWindows の上流リビジョンからの
+   バイト単位コピーとする。`renderer.js` も上流同期を原則とするが、安全な上流リビジョンを
+   待てない脆弱性には、回帰テスト付きの最小限のローカル hardening patch を許可する。
+   上流へ修正が入った時点で差分を解消し、再び上流コピーへ戻す。
 2. canvas の frame はすでに WebView2 内で動き、`window.chrome.webview` はホストに
    占有されている。素の代入は strict mode で `TypeError` になり得るため、
    互換シムは既存プロパティを調査し、段階的フォールバックで導入する。

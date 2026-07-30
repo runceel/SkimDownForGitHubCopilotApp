@@ -43,9 +43,10 @@ ADR は、SkimDown canvas 拡張の**全体アーキテクチャに関する判�
 
 | ADR | Status | 判断 |
 | --- | --- | --- |
-| [0001](0001-vendor-upstream-renderer-behind-a-compatibility-layer.md) | Accepted | 上流 renderer を変更せず、互換レイヤーの背後で利用する |
+| [0001](0001-vendor-upstream-renderer-behind-a-compatibility-layer.md) | Superseded | 上流 renderer を変更せず、互換レイヤーの背後で利用する |
 | [0002](0002-separate-ui-and-content-trust-boundaries.md) | Accepted | UI の責務分離とコンテンツの信頼境界を、frame と 2 origin で表す |
 | [0003](0003-use-state-based-same-origin-renderer-communication.md) | Accepted | renderer との合意を、同一 origin の状態確認を主経路にする |
 | [0004](0004-persist-bounded-renderer-diagnostics.md) | Accepted | renderer 診断を上限付き成果物として永続化する |
 | [0005](0005-scope-persistent-state-by-user-session-and-document.md) | Accepted | 永続状態をユーザー、セッション、文書の同一性で分ける |
-| [0006](0006-protect-loopback-apis-with-instance-capabilities.md) | Accepted | loopback API をインスタンス capability とブラウザー要求境界で保護する |
+| [0006](0006-allow-bounded-local-renderer-security-hardening.md) | Accepted | 互換レイヤー背後の上流同期を維持しつつ、緊急の renderer hardening を限定的に許可する |
+| [0007](0007-protect-loopback-apis-with-instance-capabilities.md) | Accepted | loopback API をインスタンス capability とブラウザー要求境界で保護する |

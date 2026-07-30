@@ -6,9 +6,10 @@
 //
 // The Markdown rendering pipeline (markdown-it + highlight.js + DOMPurify +
 // KaTeX + Mermaid, GitHub alerts, task lists, colour swatches, in-document
-// search, Mermaid zoom) is `web/renderer.js`, copied byte-for-byte from
-// SkimDown for Windows. `web/bridge.js` re-implements the WebView2 host channel
-// it expects on top of postMessage, so the renderer needs no changes at all.
+// search, Mermaid zoom) is `web/renderer.js`, maintained from SkimDown for
+// Windows with narrowly scoped, regression-tested security hardening when a
+// safe upstream revision is not yet available. `web/bridge.js` re-implements
+// the WebView2 host channel it expects on top of postMessage.
 //
 // Wiring only lives here; the real work is in ./lib.
 

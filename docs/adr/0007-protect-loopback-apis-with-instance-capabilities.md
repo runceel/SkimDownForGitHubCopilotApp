@@ -1,4 +1,4 @@
-# 0006: loopback API をインスタンス capability とブラウザー要求境界で保護する
+# 0007: loopback API をインスタンス capability とブラウザー要求境界で保護する
 
 - Status: Accepted
 - Date: 2026-07-30
