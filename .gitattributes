@@ -1,0 +1,7 @@
+# SkimDown のレンダラー資産は SkimDownForWindows からバイト単位でコピーしている。
+# 上流と差分を取れる状態を保つため、改行は必ず LF のままにする（コミット時にも
+# チェックアウト時にも変換しない）。
+.github/extensions/skimdown/web/renderer.js    text eol=lf
+.github/extensions/skimdown/web/renderer.html  text eol=lf
+.github/extensions/skimdown/web/skimdown.css   text eol=lf
+.github/extensions/skimdown/web/vendor/**      text eol=lf
