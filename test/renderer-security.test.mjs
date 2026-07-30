@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(here, "../.github/extensions/skimdown/web");
+const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function loadScript(window, relativePath) {
     window.eval(fs.readFileSync(path.join(webRoot, relativePath), "utf8"));
@@ -64,7 +65,12 @@ async function createRenderer({ loadPurify = true } = {}) {
 
     return {
         window,
+        messages,
         rawDivAssignments,
+        async send(message) {
+            for (const listener of listeners) listener({ data: message });
+            await new Promise((resolve) => window.setTimeout(resolve, 20));
+        },
         async render(markdown, {
             remoteContentId = "a".repeat(64),
             remoteContentToken = "",
@@ -90,6 +96,79 @@ async function createRenderer({ loadPurify = true } = {}) {
         },
     };
 }
+
+test("renderer publishes a hierarchical table of contents with stable duplicate IDs", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+
+    await renderer.render("# Intro\n\n## Details\n\n## Details\n\n### Deep dive");
+
+    const tocMessage = renderer.messages.findLast((message) => message?.type === "toc");
+    assert.deepEqual(plain(tocMessage), {
+        type: "toc",
+        headings: [
+            { level: 1, title: "Intro", id: "intro" },
+            { level: 2, title: "Details", id: "details" },
+            { level: 2, title: "Details", id: "details-1" },
+            { level: 3, title: "Deep dive", id: "deep-dive" },
+        ],
+    });
+});
+
+test("renderer scrolls to a selected ToC heading and reports it as active", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+    const content = await renderer.render("# Intro\n\n## Details");
+    const details = content.querySelector("#details");
+    let scrollOptions = null;
+    details.scrollIntoView = (options) => {
+        scrollOptions = options;
+    };
+
+    await renderer.send({ type: "toc/scroll", id: "details" });
+
+    assert.deepEqual(plain(scrollOptions), { behavior: "smooth", block: "start" });
+    assert.deepEqual(
+        plain(renderer.messages.findLast((message) => message?.type === "toc/active")),
+        { type: "toc/active", id: "details" },
+    );
+});
+
+test("renderer caps long heading IDs consistently across the DOM and ToC protocol", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+    const content = await renderer.render(`# ${"a".repeat(300)}`);
+    const heading = content.querySelector("h1");
+    const tocMessage = renderer.messages.findLast((message) => message?.type === "toc");
+    let scrolled = false;
+    heading.scrollIntoView = () => {
+        scrolled = true;
+    };
+
+    assert.equal(heading.id.length, 256);
+    assert.equal(tocMessage.headings[0].id, heading.id);
+
+    await renderer.send({ type: "toc/scroll", id: heading.id });
+    assert.equal(scrolled, true);
+});
+
+test("renderer tracks the active ToC heading as the document scrolls", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+    const content = await renderer.render("# Intro\n\n## Details\n\n## Finish");
+    const [intro, details, finish] = content.querySelectorAll("h1, h2");
+    intro.getBoundingClientRect = () => ({ top: -300 });
+    details.getBoundingClientRect = () => ({ top: 20 });
+    finish.getBoundingClientRect = () => ({ top: 300 });
+
+    renderer.window.dispatchEvent(new renderer.window.Event("scroll"));
+    await new Promise((resolve) => renderer.window.setTimeout(resolve, 20));
+
+    assert.deepEqual(
+        plain(renderer.messages.findLast((message) => message?.type === "toc/active")),
+        { type: "toc/active", id: "details" },
+    );
+});
 
 test("raw HTML is sanitized before URL rewriting or live DOM insertion", async (t) => {
     const renderer = await createRenderer();

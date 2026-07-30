@@ -221,6 +221,18 @@ test("an unrelated settings update cannot restore a stale persistence opt-in", a
     assert.equal(updated.sidebarWidth, 321);
 });
 
+test("table of contents visibility defaults on and persists explicit changes", async () => {
+    const normalized = await updateSettings({ tocVisible: "false" });
+    assert.equal(normalized.tocVisible, true);
+
+    const hidden = await updateSettings({ tocVisible: false });
+    assert.equal(hidden.tocVisible, false);
+    assert.equal((await loadSettings({ fresh: true })).tocVisible, false);
+
+    const visible = await updateSettings({ tocVisible: true });
+    assert.equal(visible.tocVisible, true);
+});
+
 test("current-session deletion fences stale caches in another process", async () => {
     const sessionId = "shared-session";
     const peer = await import(new URL("../lib/sessionDocs.mjs?peer=shared-session", import.meta.url));

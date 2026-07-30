@@ -19,6 +19,7 @@
     --skim-table-stripe: #f6f8fa;
     --skim-content-max: 760px;
     --skim-pad: clamp(16px, 4vw, 56px);
+    --skim-reserved-trailing-width: 0px;
 }
 
 body[data-theme="dark"],
@@ -60,6 +61,12 @@ main.markdown-body {
     padding: var(--skim-pad) var(--skim-pad) 96px;
     text-align: left;
     overflow-wrap: break-word;
+}
+
+#skim-zoom-root {
+    box-sizing: border-box;
+    min-height: 100vh;
+    padding-right: var(--skim-reserved-trailing-width);
 }
 
 main.markdown-body > *:first-child { margin-top: 0; }

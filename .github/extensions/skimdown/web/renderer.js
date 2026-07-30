@@ -13,6 +13,8 @@
  *   { type: "contentMaxWidth", value }   // CSS max-width: "760px"|"960px"|"1200px"|"none"
  *   { type: "search", query, caseSensitive }
  *   { type: "search/next" } / { type: "search/prev" } / { type: "search/clear" }
+ *   { type: "toc/scroll", id }
+ *   { type: "toc/layout", reservedTrailingWidth }
  *
  *   themeVars (optional): { "--skim-bg": "#...", ... } for custom user themes.
  *                         Only keys starting with "--skim-" are honored.
@@ -28,6 +30,9 @@
  *                              // before WinUI's KeyboardAccelerator sees them.
  *   { type: "remoteContent", documentId, blocked, proxied, policyBlocked, hosts }
  *   { type: "remoteContent/error", documentId }
+ *   { type: "toc", headings: [{ level, title, id }] }
+ *   { type: "toc/active", id }
+ *   { type: "modal", open }
  */
 
 (function () {
@@ -43,6 +48,11 @@
     var currentThemeIsDark = false;
     var appliedCustomVars = [];       // CSS variable names currently set on documentElement
     var mermaidReady = false;
+    var MAX_TOC_HEADINGS = 512;
+    var MAX_HEADING_ID_LENGTH = 256;
+    var tocHeadingElements = [];
+    var activeHeadingId = null;
+    var activeHeadingRaf = 0;
 
     // ----- Zoom state -----
     // Local mirror of the host's AppSettings.ZoomFactor. Kept in sync via:
@@ -838,6 +848,7 @@
 
         modal.classList.add("open");
         document.body.style.overflow = "hidden";
+        postToHost({ type: "modal", open: true });
 
         // Take the markdown body OUT of the accessibility tree while the
         // modal owns the screen. `inert` (where available) also blocks
@@ -896,6 +907,7 @@
         zoomModal.classList.remove("open");
         if (zoomContent) zoomContent.innerHTML = "";
         document.body.style.overflow = "";
+        postToHost({ type: "modal", open: false });
 
         // Restore the markdown body to the accessibility tree.
         var zoomRoot = document.getElementById("skim-zoom-root");
@@ -1225,18 +1237,85 @@
         if (!contentEl) return;
         var usedIDs = new Set();
         contentEl.querySelectorAll("[id]").forEach(function (el) {
+            if (/^H[1-6]$/.test(el.tagName)) return;
             var id = el.getAttribute("id");
             if (id) usedIDs.add(id);
         });
         contentEl.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach(function (h) {
-            if (h.getAttribute("id")) return;
-            var base = slugifyHeadingText(h.textContent || "") || "section";
+            var base = h.getAttribute("id") || slugifyHeadingText(h.textContent || "") || "section";
+            base = base.slice(0, MAX_HEADING_ID_LENGTH);
             var id = base;
             var n = 1;
-            while (usedIDs.has(id)) { id = base + "-" + n; n++; }
+            while (usedIDs.has(id)) {
+                var suffix = "-" + n;
+                id = base.slice(0, MAX_HEADING_ID_LENGTH - suffix.length) + suffix;
+                n++;
+            }
             h.setAttribute("id", id);
             usedIDs.add(id);
         });
+    }
+
+    function publishTableOfContents() {
+        if (!contentEl) return;
+
+        tocHeadingElements = Array.prototype.slice.call(
+            contentEl.querySelectorAll("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]"),
+            0,
+            MAX_TOC_HEADINGS
+        );
+
+        var headings = tocHeadingElements.map(function (heading) {
+            return {
+                level: Number(heading.tagName.slice(1)),
+                title: (heading.textContent || "").trim().slice(0, 512),
+                id: String(heading.id || "")
+            };
+        });
+
+        postToHost({ type: "toc", headings: headings });
+        updateActiveHeading(true);
+    }
+
+    function updateActiveHeading(force) {
+        var nextId = null;
+        if (tocHeadingElements.length > 0) {
+            nextId = tocHeadingElements[0].id;
+            for (var i = 0; i < tocHeadingElements.length; i++) {
+                if (tocHeadingElements[i].getBoundingClientRect().top > 96) break;
+                nextId = tocHeadingElements[i].id;
+            }
+        }
+
+        if (!force && nextId === activeHeadingId) return;
+        activeHeadingId = nextId;
+        postToHost({ type: "toc/active", id: activeHeadingId });
+    }
+
+    function scheduleActiveHeadingUpdate() {
+        if (activeHeadingRaf) return;
+        var raf = window.requestAnimationFrame || function (callback) {
+            return setTimeout(callback, 16);
+        };
+        activeHeadingRaf = raf(function () {
+            activeHeadingRaf = 0;
+            updateActiveHeading(false);
+        });
+    }
+
+    function scrollToHeading(id) {
+        if (typeof id !== "string" || id.length === 0 || id.length > 256) return;
+        for (var i = 0; i < tocHeadingElements.length; i++) {
+            if (tocHeadingElements[i].id !== id) continue;
+            try {
+                tocHeadingElements[i].scrollIntoView({ behavior: "smooth", block: "start" });
+            } catch (e) {
+                tocHeadingElements[i].scrollIntoView();
+            }
+            activeHeadingId = id;
+            postToHost({ type: "toc/active", id: id });
+            return;
+        }
     }
 
     // ----- GitHub backtick math: $`...`$ -----
@@ -1826,6 +1905,7 @@
         renderMermaidBlocks();
 
         try { window.scrollTo(0, 0); } catch (e) { /* test envs may not implement scrollTo */ }
+        publishTableOfContents();
 
         // Re-apply current search if any.
         if (search.query) {
@@ -2218,6 +2298,8 @@
         // Capture-phase so we see the key before any child handler can
         // swallow it (e.g. KaTeX-rendered widgets).
         window.addEventListener("keydown", handleAcceleratorKey, true);
+        window.addEventListener("scroll", scheduleActiveHeadingUpdate, { passive: true });
+        window.addEventListener("resize", scheduleActiveHeadingUpdate);
 
         // Ctrl+Wheel zoom + trackpad pinch (Chromium delivers precision-
         // touchpad pinches as ctrlKey wheel events). passive:false is
@@ -2286,6 +2368,18 @@
                     case "scrollToAnchor":
                         scrollToAnchorByHash(msg.hash || "");
                         break;
+                    case "toc/scroll":
+                        scrollToHeading(msg.id);
+                        break;
+                    case "toc/layout":
+                        var reserved = Number(msg.reservedTrailingWidth);
+                        if (isFinite(reserved) && reserved >= 0 && reserved <= 400) {
+                            document.documentElement.style.setProperty(
+                                "--skim-reserved-trailing-width",
+                                Math.round(reserved) + "px"
+                            );
+                        }
+                        break;
                     case "selectAll":
                         try {
                             var range = document.createRange();
@@ -2303,6 +2397,10 @@
                         break;
                     case "empty":
                         contentEl.innerHTML = '<div class="skim-empty">No Markdown selected.</div>';
+                        tocHeadingElements = [];
+                        activeHeadingId = null;
+                        postToHost({ type: "toc", headings: [] });
+                        postToHost({ type: "toc/active", id: null });
                         break;
                 }
             });

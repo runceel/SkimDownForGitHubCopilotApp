@@ -24,6 +24,7 @@
             <symbol id="i-close" viewBox="0 0 16 16"><path d="M3.72 2.66 8 6.94l4.28-4.28 1.06 1.06L9.06 8l4.28 4.28-1.06 1.06L8 9.06l-4.28 4.28-1.06-1.06L6.94 8 2.66 3.72Z"/></symbol>
             <symbol id="i-up" viewBox="0 0 16 16"><path d="m8 4.5 5 5-1.06 1.06L8 6.62 4.06 10.56 3 9.5Z"/></symbol>
             <symbol id="i-down" viewBox="0 0 16 16"><path d="m8 11.5-5-5 1.06-1.06L8 9.38l3.94-3.94L13 6.5Z"/></symbol>
+            <symbol id="i-toc" viewBox="0 0 16 16"><path d="M1.5 2.5h2v2h-2Zm4 0H15V4H5.5Zm-4 4.5h2v2h-2Zm4 0H15v1.5H5.5Zm-4 4.5h2v2h-2Zm4 0H15V13H5.5Z"/></symbol>
         </defs>
     </svg>
 
@@ -71,6 +72,9 @@
             <header id="toolbar">
                 <button type="button" class="icon-button" id="btn-toggle-sidebar" title="サイドバーの表示切替 (Ctrl+B)" aria-label="サイドバーの表示切替">
                     <svg aria-hidden="true"><use href="#i-sidebar" /></svg>
+                </button>
+                <button type="button" class="icon-button" id="btn-toggle-toc" title="目次を非表示" aria-label="目次の表示切替" aria-pressed="true">
+                    <svg aria-hidden="true"><use href="#i-toc" /></svg>
                 </button>
                 <div id="title-box">
                     <div id="doc-title">SkimDown</div>
@@ -146,6 +150,24 @@
                     sandbox="allow-scripts allow-same-origin"
                     referrerpolicy="no-referrer"></iframe>
                 <div id="empty-state" hidden>Markdown が選択されていません。</div>
+                <button
+                    type="button"
+                    id="btn-expand-toc"
+                    aria-label="目次を開く"
+                    aria-controls="toc-pane"
+                    aria-expanded="false"
+                    title="目次を開く"
+                    hidden>
+                    <svg aria-hidden="true"><use href="#i-toc" /></svg>
+                </button>
+                <aside id="toc-pane" aria-label="目次" hidden>
+                    <header id="toc-header">
+                        <span>Contents</span>
+                        <button type="button" id="btn-close-toc" aria-label="目次を非表示" title="目次を非表示">&times;</button>
+                    </header>
+                    <nav id="toc-list" aria-label="文書の見出し"></nav>
+                    <p id="toc-empty">No headings</p>
+                </aside>
             </div>
         </main>
     </div>
