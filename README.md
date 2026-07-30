@@ -84,12 +84,13 @@ flowchart TB
     ext -- "SSE /events" --> shell
 ```
 
-移植の要点は、レンダラーを **一切書き換えない** ことです。
+移植の要点は、レンダラーを原則として上流から同期することです。
 `renderer.js` がホストに触るのは `window.chrome.webview` の 2 箇所だけだったので、
 `bridge.js` でそれを `postMessage` の上に再実装しました。
-その結果 `renderer.js` / `skimdown.css` / `vendor/**` は SkimDown for Windows からバイト単位でコピーでき、
-`renderer.html` の差分も `<script src="bridge.js">` の 1 行だけです。
-SkimDown 側が改善されたら、それらのファイルを上書きコピーするだけで追従できます。
+`skimdown.css` / `vendor/**` は SkimDown for Windows からバイト単位でコピーし、
+`renderer.html` の差分も `<script src="bridge.js">` の 1 行だけです。`renderer.js` も同じ
+同期モデルを使いますが、安全な上流リビジョンが未提供の脆弱性については、回帰テスト付きの
+最小限のローカル修正を許可し、上流へ反映された時点で再同期します。
 
 ローカルの HTTP サーバーは 2 本立てます。SkimDown が WebView2 で採っている
 「アセット origin と コンテンツ origin を分ける」設計をそのまま踏襲したもので、
