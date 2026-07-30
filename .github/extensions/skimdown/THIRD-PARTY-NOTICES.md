@@ -5,8 +5,10 @@ canvas renders Markdown completely offline. They are shipped unmodified, exactly
 appear in [SkimDown for Windows](https://github.com/runceel/SkimDownForWindows), under
 `web/vendor/`.
 
-The renderer itself (`web/renderer.js`, `web/renderer.html`, `web/skimdown.css`) is copied
-from SkimDown for Windows, which is authored by the same author as this repository.
+The renderer assets (`web/renderer.js`, `web/renderer.html`, `web/skimdown.css`) are
+derived from SkimDown for Windows, which is authored by the same author as this
+repository. This repository may carry narrowly scoped security hardening in
+`web/renderer.js` until the corresponding upstream change is available.
 
 | Component | Version | License | Project |
 | --- | --- | --- | --- |

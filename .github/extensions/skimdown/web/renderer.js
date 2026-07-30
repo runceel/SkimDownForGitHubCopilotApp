@@ -34,8 +34,6 @@
     var contentEl = null;
     var currentSourceDir = "";
     var currentContentBaseUri = "";
-    var lastRenderedMarkdown = "";
-    var lastRenderedHtml = "";
     var currentTheme = "light";       // "light" | "dark" | "custom"
     var currentThemeType = "light";   // "light" | "dark" — drives hljs + Mermaid choice
     var currentThemeIsDark = false;
@@ -1544,11 +1542,10 @@
         applyZoomDelta(normalizeWheelDeltaY(ev));
     }
 
-    function rewriteRelativeUrls(html) {
-        if (!currentContentBaseUri || !currentSourceDir) return html;
-        // Use a DOM walker to rewrite src/href that look like relative paths.
-        var tmp = document.createElement("div");
-        tmp.innerHTML = html;
+    function rewriteRelativeUrls(root) {
+        if (!currentContentBaseUri || !currentSourceDir) return root;
+        // The root has already been sanitized and is still detached from the
+        // live document, so URL rewriting cannot activate untrusted markup.
 
         function isAbsolute(u) {
             return /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(u);
@@ -1567,13 +1564,13 @@
             }
         }
 
-        tmp.querySelectorAll("img[src]").forEach(function (el) {
+        root.querySelectorAll("img[src]").forEach(function (el) {
             var src = el.getAttribute("src");
             if (!src || isAbsolute(src)) return;
             el.setAttribute("src", resolveOn(currentContentBaseUri, currentSourceDir, src));
         });
 
-        return tmp.innerHTML;
+        return root;
     }
 
     // KaTeX emits MathML + a parallel HTML span tree under .katex root. Allow
@@ -1621,6 +1618,27 @@
         });
     }
 
+    function sanitizeRenderedHtml(html) {
+        if (!window.DOMPurify) {
+            var fallback = document.createDocumentFragment();
+            var error = document.createElement("div");
+            error.className = "skim-error";
+            error.textContent = "Markdown rendering unavailable: sanitizer failed to load.";
+            fallback.appendChild(error);
+            return fallback;
+        }
+
+        return window.DOMPurify.sanitize(html, {
+            RETURN_DOM_FRAGMENT: true,
+            USE_PROFILES: { html: true, mathMl: true },
+            ADD_TAGS: KATEX_TAGS.concat(["button"]),
+            ADD_ATTR: KATEX_ATTRS.concat(["target", "rel", "id", "type", "aria-label", "data-source", "width", "height", "checked", "disabled"]),
+            ALLOW_DATA_ATTR: true,
+            FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form"],
+            FORBID_ATTR: ["onerror", "onload", "onclick"],
+        });
+    }
+
     function render(markdown, sourcePath, contentBaseUri, theme, themeType, themeIsDark, themeVars) {
         if (typeof markdown !== "string") markdown = "";
         // If the user switches to another file while the zoom modal is open,
@@ -1646,22 +1664,9 @@
             raw = '<div class="skim-error">Markdown render failed: ' + escapeHtml(String(e)) + '</div>';
         }
 
-        raw = rewriteRelativeUrls(raw);
-
-        var clean = window.DOMPurify
-            ? window.DOMPurify.sanitize(raw, {
-                  USE_PROFILES: { html: true, mathMl: true },
-                  ADD_TAGS: KATEX_TAGS.concat(["button"]),
-                  ADD_ATTR: KATEX_ATTRS.concat(["target", "rel", "id", "type", "aria-label", "data-source", "width", "height", "checked", "disabled"]),
-                  ALLOW_DATA_ATTR: true,
-                  FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form"],
-                  FORBID_ATTR: ["onerror", "onload", "onclick"],
-              })
-            : raw;
-
-        lastRenderedMarkdown = markdown;
-        lastRenderedHtml = clean;
-        contentEl.innerHTML = clean;
+        var clean = sanitizeRenderedHtml(raw);
+        rewriteRelativeUrls(clean);
+        contentEl.replaceChildren(clean);
 
         // DOMPurify strips `data-source` on <pre class="mermaid"> when the
         // value contains characters it flags as risky (e.g. raw `>`), so
