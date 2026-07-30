@@ -33,7 +33,16 @@ import {
     rememberSelection,
     registryEvents,
 } from "./sessionDocs.mjs";
-import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag, diagFile } from "./paths.mjs";
+import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag } from "./paths.mjs";
+import {
+    DIAG_ENTRY_MAX_BYTES,
+    DIAG_REQUEST_MAX_BYTES,
+    DIAG_SCHEMA_VERSION,
+    DiagnosticValidationError,
+    createDiagnosticRateLimiter,
+    diagnosticByteLength,
+    validateDiagnostic,
+} from "./diagnostics.mjs";
 import { createWatcher } from "./watcher.mjs";
 import { isMarkdownFile } from "./scanner.mjs";
 
@@ -88,6 +97,7 @@ export async function createInstance(ctx) {
     };
 
     const sseClients = new Set();
+    const diagnosticRateLimiter = createDiagnosticRateLimiter();
     /** token -> absolute directory, backing the content origin. */
     const contentDirs = new Map();
     const approvedRoots = new Set();
@@ -494,7 +504,22 @@ export async function createInstance(ctx) {
             return sendJson(res, 415, { error: "application/json is required" });
         }
 
-        const body = await readJsonBody(req);
+        if (pathname === "/api/diag") {
+            const rate = diagnosticRateLimiter.take();
+            if (!rate.allowed) {
+                return sendJson(
+                    res,
+                    429,
+                    { error: "rate limit exceeded" },
+                    { "Retry-After": String(Math.ceil(rate.retryAfterMs / 1000)) },
+                );
+            }
+        }
+
+        const body = await readJsonBody(
+            req,
+            pathname === "/api/diag" ? DIAG_REQUEST_MAX_BYTES : MAX_REQUEST_BYTES,
+        );
 
         switch (pathname) {
             case "/api/select": {
@@ -539,18 +564,32 @@ export async function createInstance(ctx) {
                 // evidence is gone before anyone can read it. The file is
                 // capped, so recording healthy boots too costs nothing and
                 // makes "it worked, and how" observable.
-                const healthy =
-                    body.reason === "bridge-installed" || body.reason === "shell-boot";
-                await appendDiag({
+                let diagnostic;
+                try {
+                    diagnostic = validateDiagnostic(body);
+                } catch (error) {
+                    if (error instanceof DiagnosticValidationError) {
+                        return sendJson(res, 400, { error: error.message });
+                    }
+                    throw error;
+                }
+                const entry = {
+                    schemaVersion: DIAG_SCHEMA_VERSION,
                     at: new Date().toISOString(),
                     instanceId: state.instanceId,
-                    ...body,
-                });
+                    ...diagnostic,
+                };
+                if (diagnosticByteLength(entry) > DIAG_ENTRY_MAX_BYTES) {
+                    return sendJson(res, 413, { error: "diagnostic entry too large" });
+                }
+                const healthy =
+                    diagnostic.reason === "bridge-installed" || diagnostic.reason === "shell-boot";
+                await appendDiag(entry);
                 ctx.log?.(
-                    `renderer diagnostic (${state.instanceId}): ${JSON.stringify(body).slice(0, 900)}`,
+                    `renderer diagnostic (${state.instanceId}): ${JSON.stringify(diagnostic).slice(0, 900)}`,
                     { level: healthy ? "info" : "warning" },
                 );
-                return sendJson(res, 200, { ok: true, file: diagFile() });
+                return sendJson(res, 200, { ok: true });
             }
             case "/api/open-external": {
                 const opened = openExternal(String(body.href || ""));
@@ -774,25 +813,30 @@ function openExternal(href) {
     }
 }
 
-async function readJsonBody(req) {
+async function readJsonBody(req, maxBytes) {
+    const declaredLength = Number(req.headers["content-length"]);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+        throw httpError(413, "request body too large");
+    }
+
     const chunks = [];
     let size = 0;
     for await (const chunk of req) {
         size += chunk.length;
-        if (size > MAX_REQUEST_BYTES) throw httpError(413, "request body too large");
+        if (size > maxBytes) throw httpError(413, "request body too large");
         chunks.push(chunk);
     }
     if (chunks.length === 0) throw httpError(400, "JSON body is required");
+    let parsed;
     try {
-        const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-            throw httpError(400, "JSON body must be an object");
-        }
-        return parsed;
-    } catch (error) {
-        if (error?.statusCode) throw error;
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
         throw httpError(400, "invalid JSON body");
     }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw httpError(400, "JSON body must be an object");
+    }
+    return parsed;
 }
 
 function canonicalPath(value) {
@@ -848,11 +892,12 @@ function httpError(statusCode, message) {
     return Object.assign(new Error(message), { statusCode });
 }
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, headers = {}) {
     const body = JSON.stringify(payload ?? null);
     res.writeHead(status, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
+        ...headers,
     });
     res.end(body);
 }
