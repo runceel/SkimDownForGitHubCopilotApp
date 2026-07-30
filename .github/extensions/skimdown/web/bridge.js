@@ -2,8 +2,12 @@
  *
  * `renderer.js` is copied byte-for-byte from SkimDown for Windows, where it
  * talks to the WinUI host through WebView2's `window.chrome.webview`. Inside a
- * GitHub Copilot app canvas there is no WebView2 host, so this shim provides
- * the same two-method surface backed by the parent shell document.
+ * GitHub Copilot app canvas that host is gone, so this shim provides the same
+ * two-method surface backed by the parent shell document instead.
+ *
+ * Note that the app itself is *also* WebView2-based, so `chrome.webview`
+ * already exists here and belongs to someone else — see the installer at the
+ * bottom of this file, which is why taking that name is not a plain assignment.
  *
  * Transport: `renderer.html` is loaded from a *relative* URL, so this frame is
  * always same-origin with the shell. That means the two documents can call
@@ -69,6 +73,7 @@
             readySent: !!lastReady,
             listeners: listeners.length,
             directHandle: directShellReceiver() ? "function" : "missing",
+            install: installReport,
             readyState: document.readyState,
             bodyChildren: document.body ? document.body.children.length : -1,
             contentChildren: content ? content.children.length : -1,
@@ -175,8 +180,23 @@
 
     // ---------- WebView2-compatible surface ----------
 
-    window.chrome = window.chrome || {};
-    window.chrome.webview = {
+    /* renderer.js reaches its host through `window.chrome.webview`, so the shim
+     * has to occupy that exact name.
+     *
+     * In a plain browser the name is free and `window.chrome.webview = {...}`
+     * works. Inside the GitHub Copilot app it does not: the canvas is rendered
+     * by a real WebView2, which has already installed the *app's* bridge there
+     * as a getter-only accessor. Assigning to it throws a TypeError under
+     * `"use strict"`, and that used to abort this entire module — so
+     * `__skimBridge` below was never published, renderer.js found the app's
+     * bridge instead of ours, and its `ready` was posted to the app rather than
+     * to the shell. The preview then stayed blank until the shell gave up.
+     *
+     * So: define rather than assign, fall through progressively blunter
+     * strategies, and never throw. `installReport` records what happened; the
+     * shell surfaces it when a handshake fails. */
+
+    var webviewShim = {
         postMessage: function (payload) {
             if (payload && payload.type === "ready") lastReady = payload;
             post(payload);
@@ -192,16 +212,116 @@
         },
     };
 
+    function defineValue(target, name, value) {
+        Object.defineProperty(target, name, {
+            value: value,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+        });
+    }
+
+    /** True once `window.chrome.webview` is the object renderer.js should use. */
+    function shimInstalled() {
+        try {
+            var webview = window.chrome && window.chrome.webview;
+            return !!webview && webview.postMessage === webviewShim.postMessage;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function describeProperty(target, name) {
+        try {
+            if (!target) return "no-target";
+            var desc = Object.getOwnPropertyDescriptor(target, name);
+            if (!desc) return "absent";
+            return (desc.get ? "getter" : "value")
+                + (desc.set ? "+setter" : "")
+                + (desc.writable ? " writable" : "")
+                + (desc.configurable ? " configurable" : " non-configurable");
+        } catch (e) {
+            return "descriptor-error:" + (e && e.name);
+        }
+    }
+
+    function installWebviewShim() {
+        var report = { strategy: null, failures: [] };
+        try {
+            report.hadChrome = !!window.chrome;
+            report.hadWebview = !!(window.chrome && window.chrome.webview);
+            report.chromeProperty = describeProperty(window, "chrome");
+            report.webviewProperty = describeProperty(window.chrome, "webview");
+        } catch (e) {
+            report.probeError = e && e.name;
+        }
+
+        function attempt(name, apply) {
+            if (report.strategy) return;
+            try {
+                apply();
+            } catch (e) {
+                report.failures.push(name + ": " + ((e && e.message) || e));
+                return;
+            }
+            if (shimInstalled()) report.strategy = name;
+            else report.failures.push(name + ": no effect");
+        }
+
+        // 1. The ordinary case: `webview` is absent, or present but replaceable.
+        attempt("define-on-chrome", function () {
+            if (!window.chrome) defineValue(window, "chrome", {});
+            defineValue(window.chrome, "webview", webviewShim);
+        });
+
+        // 2. `webview` is locked down: swap the whole `chrome` object for a copy
+        //    carrying our shim.
+        attempt("replace-chrome", function () {
+            var next = {};
+            var current = window.chrome;
+            for (var key in current) {
+                if (key === "webview") continue;
+                try {
+                    next[key] = current[key];
+                } catch (e) {
+                    // A throwing accessor is not worth carrying over.
+                }
+            }
+            next.webview = webviewShim;
+            defineValue(window, "chrome", next);
+        });
+
+        // 3. `chrome` is locked down too: patch the three methods renderer.js
+        //    actually calls onto whatever object occupies the name.
+        attempt("patch-webview", function () {
+            var webview = window.chrome && window.chrome.webview;
+            if (!webview) throw new Error("no webview object to patch");
+            defineValue(webview, "postMessage", webviewShim.postMessage);
+            defineValue(webview, "addEventListener", webviewShim.addEventListener);
+            defineValue(webview, "removeEventListener", webviewShim.removeEventListener);
+        });
+
+        if (!report.strategy) {
+            report.strategy = "failed";
+            recordError("bridge install failed: " + report.failures.join(" | "));
+        }
+        return report;
+    }
+
+    var installReport = installWebviewShim();
+
     // The shell reads this directly (same-origin) to drive the renderer and to
     // interrogate a failed boot without needing any message to get through.
-    window.__skimBridge = {
-        version: 2,
+    // Defined rather than assigned for the same reason as the shim above.
+    defineValue(window, "__skimBridge", {
+        version: 3,
         deliver: deliver,
         isReady: function () {
             return !!lastReady;
         },
         errors: errors,
+        install: installReport,
         snapshot: snapshot,
         beacon: beacon,
-    };
+    });
 })();

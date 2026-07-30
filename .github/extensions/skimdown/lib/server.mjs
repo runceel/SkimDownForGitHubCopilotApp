@@ -460,10 +460,14 @@ export async function createInstance(ctx) {
                 return sendJson(res, 200, await resolveLink(String(body.href || "")));
             }
             case "/api/diag": {
-                // The renderer runs in a nested iframe we cannot inspect from
-                // the extension process, so it reports failures here. The
-                // extension log channel is ephemeral, so persist it too —
-                // otherwise the evidence is gone before anyone can read it.
+                // The renderer runs in a nested iframe the extension process
+                // cannot inspect, so it reports here. Persisted as well as
+                // logged: the log channel is ephemeral, and otherwise the
+                // evidence is gone before anyone can read it. The file is
+                // capped, so recording healthy boots too costs nothing and
+                // makes "it worked, and how" observable.
+                const healthy =
+                    body.reason === "bridge-installed" || body.reason === "shell-boot";
                 await appendDiag({
                     at: new Date().toISOString(),
                     instanceId: state.instanceId,
@@ -471,7 +475,7 @@ export async function createInstance(ctx) {
                 });
                 ctx.log?.(
                     `renderer diagnostic (${state.instanceId}): ${JSON.stringify(body).slice(0, 900)}`,
-                    { level: "warning" },
+                    { level: healthy ? "info" : "warning" },
                 );
                 return sendJson(res, 200, { ok: true, file: diagFile() });
             }

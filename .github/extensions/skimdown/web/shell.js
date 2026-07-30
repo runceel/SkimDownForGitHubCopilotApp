@@ -178,7 +178,11 @@
         }
         var bridge = rendererBridge();
         if (bridge) {
-            info.bridge = { version: bridge.version, isReady: bridge.isReady() };
+            info.bridge = {
+                version: bridge.version,
+                isReady: bridge.isReady(),
+                install: bridge.install,
+            };
             try {
                 info.rendererSnapshot = bridge.snapshot("shell-request");
             } catch (e) {
@@ -195,6 +199,10 @@
     function rendererFailureHint() {
         var bridge = rendererBridge();
         if (!bridge) return "レンダラーのスクリプトが読み込まれていません";
+        var install = bridge.install;
+        if (install && install.strategy === "failed") {
+            return "レンダラーとの通信経路を確保できませんでした";
+        }
         var errors = bridge.errors || [];
         if (errors.length) return errors[0];
         if (rendererLogs.length) return rendererLogs[0];
@@ -210,6 +218,37 @@
         payload.nested = window.parent !== window;
         // Best effort: diagnostics must never break the shell.
         api("/api/diag", payload).catch(noop);
+    }
+
+    /* The app is itself WebView2-based, so `chrome.webview` already exists in
+     * the renderer frame and the bridge has to displace it. Getting that wrong
+     * is precisely what used to leave the preview blank, and which strategy
+     * won is not observable from the extension process — so record it once per
+     * shell, on success. Logged rather than persisted: this is a note about a
+     * healthy boot, not a fault. */
+    var bridgeInstallReported = false;
+
+    /* Fired unconditionally at shell startup. Without it, a panel still pointing
+     * at a port from a previous extension process is indistinguishable from a
+     * panel that loaded and then failed — both are simply silent. */
+    function reportShellBoot() {
+        api("/api/diag", {
+            reason: "shell-boot",
+            from: "shell",
+            shellOrigin: window.location.origin,
+            nested: window.parent !== window,
+            userAgent: navigator.userAgent
+        }).catch(noop);
+    }
+
+    function reportBridgeInstall() {
+        if (bridgeInstallReported) return;
+        var bridge = rendererBridge();
+        var install = bridge && bridge.install;
+        if (!install) return;
+        bridgeInstallReported = true;
+        api("/api/diag", { reason: "bridge-installed", from: "shell", install: install })
+            .catch(noop);
     }
 
     function stopHandshakeWatch() {
@@ -291,6 +330,7 @@
                 state.rendererReady = true;
                 stopHandshakeWatch();
                 showDeadBar(false);
+                reportBridgeInstall();
                 pushThemeToRenderer();
                 pushSettingsToRenderer();
                 flushRendererQueue();
@@ -1411,6 +1451,7 @@
     function noop() {}
 
     syncShellColorScheme(isDarkTone());
+    reportShellBoot();
     connectEvents();
     api("/api/state").then(applyServerState).catch(showError);
 })();

@@ -37,13 +37,25 @@ export function diagFile() {
     return path.join(artifactsDir(), "diag.jsonl");
 }
 
+/* Written on every canvas boot, so without a cap the file grows forever. Keep
+ * the tail: an entry is only interesting until the problem it describes has
+ * been dealt with. */
+const DIAG_MAX_LINES = 200;
+
 export async function appendDiag(entry) {
     try {
         await ensureDir(artifactsDir());
         await fs.appendFile(diagFile(), JSON.stringify(entry) + "\n", "utf8");
+        await trimDiag();
     } catch {
         // Diagnostics must never take the canvas down.
     }
+}
+
+async function trimDiag() {
+    const lines = (await fs.readFile(diagFile(), "utf8")).split("\n").filter(Boolean);
+    if (lines.length <= DIAG_MAX_LINES) return;
+    await fs.writeFile(diagFile(), lines.slice(-DIAG_MAX_LINES).join("\n") + "\n", "utf8");
 }
 
 export function sessionStateFile(sessionId) {
