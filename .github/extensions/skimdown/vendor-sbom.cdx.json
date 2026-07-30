@@ -1,0 +1,263 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:github/runceel/SkimDownForGitHubCopilotApp",
+      "name": "SkimDown for GitHub Copilot App"
+    },
+    "properties": [
+      {
+        "name": "skimdown:upstream-repository",
+        "value": "https://github.com/runceel/SkimDownForWindows"
+      },
+      {
+        "name": "skimdown:upstream-revision",
+        "value": "fe85a6cf6faa1f1f79bdc8ee877f0c3cc415a670"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/dompurify@3.1.6",
+      "name": "dompurify",
+      "version": "3.1.6",
+      "purl": "pkg:npm/dompurify@3.1.6",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MPL-2.0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/cure53/DOMPurify"
+        },
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/dompurify/-/dompurify-3.1.6.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "skimdown:vendored-files",
+          "value": "dompurify.min.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/highlight.js@11.10.0",
+      "name": "highlight.js",
+      "version": "11.10.0",
+      "purl": "pkg:npm/highlight.js@11.10.0",
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/highlightjs/highlight.js"
+        },
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/highlight.js/-/highlight.js-11.10.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "skimdown:vendored-files",
+          "value": "github-dark.min.css,github.min.css,highlight.min.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/katex@0.16.22",
+      "name": "katex",
+      "version": "0.16.22",
+      "purl": "pkg:npm/katex@0.16.22",
+      "licenses": [
+        {
+          "expression": "MIT AND OFL-1.1"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/KaTeX/KaTeX"
+        },
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/katex/-/katex-0.16.22.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "skimdown:vendored-files",
+          "value": "katex/auto-render.min.js,katex/fonts/KaTeX_AMS-Regular.woff2,katex/fonts/KaTeX_Caligraphic-Bold.woff2,katex/fonts/KaTeX_Caligraphic-Regular.woff2,katex/fonts/KaTeX_Fraktur-Bold.woff2,katex/fonts/KaTeX_Fraktur-Regular.woff2,katex/fonts/KaTeX_Main-Bold.woff2,katex/fonts/KaTeX_Main-BoldItalic.woff2,katex/fonts/KaTeX_Main-Italic.woff2,katex/fonts/KaTeX_Main-Regular.woff2,katex/fonts/KaTeX_Math-BoldItalic.woff2,katex/fonts/KaTeX_Math-Italic.woff2,katex/fonts/KaTeX_SansSerif-Bold.woff2,katex/fonts/KaTeX_SansSerif-Italic.woff2,katex/fonts/KaTeX_SansSerif-Regular.woff2,katex/fonts/KaTeX_Script-Regular.woff2,katex/fonts/KaTeX_Size1-Regular.woff2,katex/fonts/KaTeX_Size2-Regular.woff2,katex/fonts/KaTeX_Size3-Regular.woff2,katex/fonts/KaTeX_Size4-Regular.woff2,katex/fonts/KaTeX_Typewriter-Regular.woff2,katex/katex.min.css,katex/katex.min.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/markdown-it@14.1.0",
+      "name": "markdown-it",
+      "version": "14.1.0",
+      "purl": "pkg:npm/markdown-it@14.1.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/markdown-it/markdown-it"
+        },
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/markdown-it/-/markdown-it-14.1.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "skimdown:vendored-files",
+          "value": "markdown-it.min.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/markdown-it-emoji@3.0.0",
+      "name": "markdown-it-emoji",
+      "version": "3.0.0",
+      "purl": "pkg:npm/markdown-it-emoji@3.0.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/markdown-it/markdown-it-emoji"
+        },
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/markdown-it-emoji/-/markdown-it-emoji-3.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "skimdown:vendored-files",
+          "value": "markdown-it-emoji.min.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/markdown-it-footnote@4.0.0",
+      "name": "markdown-it-footnote",
+      "version": "4.0.0",
+      "purl": "pkg:npm/markdown-it-footnote@4.0.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/markdown-it/markdown-it-footnote"
+        },
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/markdown-it-footnote/-/markdown-it-footnote-4.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "skimdown:vendored-files",
+          "value": "markdown-it-footnote.min.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/markdown-it-imsize@2.0.1",
+      "name": "markdown-it-imsize",
+      "version": "2.0.1",
+      "purl": "pkg:npm/markdown-it-imsize@2.0.1",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/tatsy/markdown-it-imsize"
+        },
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/markdown-it-imsize/-/markdown-it-imsize-2.0.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "skimdown:vendored-files",
+          "value": "markdown-it-imsize.min.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/mermaid@11.15.0",
+      "name": "mermaid",
+      "version": "11.15.0",
+      "purl": "pkg:npm/mermaid@11.15.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mermaid-js/mermaid"
+        },
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/mermaid/-/mermaid-11.15.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "skimdown:vendored-files",
+          "value": "mermaid/mermaid.min.js"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:github/runceel/SkimDownForGitHubCopilotApp",
+      "dependsOn": [
+        "pkg:npm/dompurify@3.1.6",
+        "pkg:npm/highlight.js@11.10.0",
+        "pkg:npm/katex@0.16.22",
+        "pkg:npm/markdown-it-emoji@3.0.0",
+        "pkg:npm/markdown-it-footnote@4.0.0",
+        "pkg:npm/markdown-it-imsize@2.0.1",
+        "pkg:npm/markdown-it@14.1.0",
+        "pkg:npm/mermaid@11.15.0"
+      ]
+    }
+  ]
+}

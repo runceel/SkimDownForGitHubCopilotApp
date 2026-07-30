@@ -22,3 +22,7 @@ from SkimDown for Windows, which is authored by the same author as this reposito
 | Mermaid | 11.15.0 | MIT | <https://github.com/mermaid-js/mermaid> |
 
 Each project's full license text is available in its repository at the version listed above.
+
+Exact file hashes, the pinned upstream revision, official package sources, and the generated
+CycloneDX inventory are recorded in
+[`vendor-lock.json`](vendor-lock.json) and [`vendor-sbom.cdx.json`](vendor-sbom.cdx.json).

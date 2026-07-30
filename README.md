@@ -112,3 +112,12 @@ SkimDown のカスタムテーマ機構（`--skim-*`）に写して渡します�
 
 同梱している OSS のライセンスは
 [THIRD-PARTY-NOTICES.md](.github/extensions/skimdown/THIRD-PARTY-NOTICES.md) を参照してください。
+
+## Supply chain
+
+vendored 資産は、固定した SkimDown for Windows の commit とファイル単位の SHA-256 に対して
+CI で検証します。依存物一覧は
+[`vendor-lock.json`](.github/extensions/skimdown/vendor-lock.json) と
+[`vendor-sbom.cdx.json`](.github/extensions/skimdown/vendor-sbom.cdx.json) に記録します。
+更新手順、外部 pull request の確認手順、branch protection の必須設定は
+[CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。

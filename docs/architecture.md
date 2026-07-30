@@ -148,7 +148,9 @@ ephemeral であり、再接続後の調査には残らない。
 
 1. `renderer.js`、`skimdown.css`、`vendor/**` は、採用した
    SkimDownForWindows の上流リビジョンからのバイト単位コピーとする。手で編集しない。
-   変更が必要なら上流を修正し、上流リビジョンを更新して再コピーする。
+   変更が必要なら上流を修正し、上流リビジョンを更新して再コピーする。vendored 実行資産は
+   完全な上流 commit、ファイル単位の SHA-256、依存コンポーネント情報で固定し、
+   repository 内と固定取得元の両方に対して CI で検証する。
 2. canvas の frame はすでに WebView2 内で動き、`window.chrome.webview` はホストに
    占有されている。素の代入は strict mode で `TypeError` になり得るため、
    互換シムは既存プロパティを調査し、段階的フォールバックで導入する。

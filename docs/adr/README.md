@@ -48,3 +48,4 @@ ADR は、SkimDown canvas 拡張の**全体アーキテクチャに関する判�
 | [0003](0003-use-state-based-same-origin-renderer-communication.md) | Accepted | renderer との合意を、同一 origin の状態確認を主経路にする |
 | [0004](0004-persist-bounded-renderer-diagnostics.md) | Accepted | renderer 診断を上限付き成果物として永続化する |
 | [0005](0005-scope-persistent-state-by-user-session-and-document.md) | Accepted | 永続状態をユーザー、セッション、文書の同一性で分ける |
+| [0006](0006-pin-and-verify-vendored-executable-assets.md) | Accepted | vendored 実行資産の取得元と byte 列を固定して検証する |
