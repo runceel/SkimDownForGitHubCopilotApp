@@ -10,7 +10,7 @@
  */
 
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -33,7 +33,16 @@ import {
     rememberSelection,
     registryEvents,
 } from "./sessionDocs.mjs";
-import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag, diagFile } from "./paths.mjs";
+import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag } from "./paths.mjs";
+import {
+    DIAG_ENTRY_MAX_BYTES,
+    DIAG_REQUEST_MAX_BYTES,
+    DIAG_SCHEMA_VERSION,
+    DiagnosticValidationError,
+    createDiagnosticRateLimiter,
+    diagnosticByteLength,
+    validateDiagnostic,
+} from "./diagnostics.mjs";
 import { createWatcher } from "./watcher.mjs";
 import { isMarkdownFile } from "./scanner.mjs";
 
@@ -67,6 +76,8 @@ const CONTENT_TYPES = new Map(Object.entries({
 }));
 
 const SSE_KEEPALIVE_MS = 25000;
+const DEFAULT_REQUEST_MAX_BYTES = 8 * 1024 * 1024;
+const CAPABILITY_HEADER = "x-skimdown-capability";
 
 /**
  * Create and start the servers plus all state for one canvas instance.
@@ -86,6 +97,8 @@ export async function createInstance(ctx) {
     };
 
     const sseClients = new Set();
+    const diagnosticToken = randomBytes(32).toString("base64url");
+    const diagnosticRateLimiter = createDiagnosticRateLimiter();
     /** token -> absolute directory, backing the content origin. */
     const contentDirs = new Map();
 
@@ -115,7 +128,7 @@ export async function createInstance(ctx) {
     });
     await listen(assetServer);
     const assetPort = portOf(assetServer);
-    const url = `http://127.0.0.1:${assetPort}/`;
+    const url = `http://127.0.0.1:${assetPort}/#capability=${encodeURIComponent(diagnosticToken)}`;
 
     // ---------- state helpers ----------
 
@@ -421,7 +434,36 @@ export async function createInstance(ctx) {
 
         if (req.method !== "POST") return endWithStatus(res, 405, "method not allowed");
 
-        const body = await readJsonBody(req);
+        if (pathname === "/api/diag") {
+            if (!hasCapability(req, diagnosticToken)) {
+                return sendJson(res, 401, { error: "unauthorized" });
+            }
+            if (!isJsonRequest(req)) {
+                return sendJson(res, 415, { error: "content type must be application/json" });
+            }
+            const rate = diagnosticRateLimiter.take();
+            if (!rate.allowed) {
+                return sendJson(
+                    res,
+                    429,
+                    { error: "rate limit exceeded" },
+                    { "Retry-After": String(Math.ceil(rate.retryAfterMs / 1000)) },
+                );
+            }
+        }
+
+        let body;
+        try {
+            body = await readJsonBody(
+                req,
+                pathname === "/api/diag" ? DIAG_REQUEST_MAX_BYTES : DEFAULT_REQUEST_MAX_BYTES,
+            );
+        } catch (error) {
+            if (error instanceof RequestBodyError) {
+                return sendJson(res, error.status, { error: error.message });
+            }
+            throw error;
+        }
 
         switch (pathname) {
             case "/api/select": {
@@ -466,18 +508,32 @@ export async function createInstance(ctx) {
                 // evidence is gone before anyone can read it. The file is
                 // capped, so recording healthy boots too costs nothing and
                 // makes "it worked, and how" observable.
-                const healthy =
-                    body.reason === "bridge-installed" || body.reason === "shell-boot";
-                await appendDiag({
+                let diagnostic;
+                try {
+                    diagnostic = validateDiagnostic(body);
+                } catch (error) {
+                    if (error instanceof DiagnosticValidationError) {
+                        return sendJson(res, 400, { error: error.message });
+                    }
+                    throw error;
+                }
+                const entry = {
+                    schemaVersion: DIAG_SCHEMA_VERSION,
                     at: new Date().toISOString(),
                     instanceId: state.instanceId,
-                    ...body,
-                });
+                    ...diagnostic,
+                };
+                if (diagnosticByteLength(entry) > DIAG_ENTRY_MAX_BYTES) {
+                    return sendJson(res, 413, { error: "diagnostic entry too large" });
+                }
+                const healthy =
+                    diagnostic.reason === "bridge-installed" || diagnostic.reason === "shell-boot";
+                await appendDiag(entry);
                 ctx.log?.(
-                    `renderer diagnostic (${state.instanceId}): ${JSON.stringify(body).slice(0, 900)}`,
+                    `renderer diagnostic (${state.instanceId}): ${JSON.stringify(diagnostic).slice(0, 900)}`,
                     { level: healthy ? "info" : "warning" },
                 );
-                return sendJson(res, 200, { ok: true, file: diagFile() });
+                return sendJson(res, 200, { ok: true });
             }
             case "/api/open-external": {
                 const opened = openExternal(String(body.href || ""));
@@ -690,28 +746,58 @@ function openExternal(href) {
     }
 }
 
-async function readJsonBody(req) {
+class RequestBodyError extends Error {
+    constructor(status, message) {
+        super(message);
+        this.status = status;
+    }
+}
+
+async function readJsonBody(req, maxBytes) {
+    const declaredLength = Number(req.headers["content-length"]);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+        throw new RequestBodyError(413, "request body too large");
+    }
+
     const chunks = [];
     let size = 0;
     for await (const chunk of req) {
         size += chunk.length;
-        if (size > 8 * 1024 * 1024) throw new Error("request body too large");
+        if (size > maxBytes) throw new RequestBodyError(413, "request body too large");
         chunks.push(chunk);
     }
     if (chunks.length === 0) return {};
+    let parsed;
     try {
-        const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        return parsed && typeof parsed === "object" ? parsed : {};
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     } catch {
-        return {};
+        throw new RequestBodyError(400, "request body must be valid JSON");
     }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new RequestBodyError(400, "request body must be a JSON object");
+    }
+    return parsed;
 }
 
-function sendJson(res, status, payload) {
+function isJsonRequest(req) {
+    const contentType = req.headers["content-type"];
+    return typeof contentType === "string" && /^application\/json(?:\s*;|$)/i.test(contentType);
+}
+
+function hasCapability(req, expected) {
+    const actual = req.headers[CAPABILITY_HEADER];
+    if (typeof actual !== "string") return false;
+    const actualBuffer = Buffer.from(actual, "utf8");
+    const expectedBuffer = Buffer.from(expected, "utf8");
+    return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function sendJson(res, status, payload, headers = {}) {
     const body = JSON.stringify(payload ?? null);
     res.writeHead(status, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
+        ...headers,
     });
     res.end(body);
 }

@@ -279,7 +279,6 @@ const canvas = createCanvas({
                     rootLabel: instance.state.listing?.rootLabel ?? null,
                     count: instance.state.listing?.count ?? 0,
                     selection: instance.state.selection,
-                    url: instance.url,
                 };
             },
         },

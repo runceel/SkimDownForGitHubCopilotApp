@@ -44,7 +44,7 @@
 
     function recordError(text) {
         if (errors.length >= 12) return;
-        errors.push(String(text).slice(0, 400));
+        errors.push(String(text).slice(0, 256));
     }
 
     // Registered before every other script in the document, so this sees the
@@ -68,8 +68,6 @@
         return {
             from: "renderer",
             reason: reason,
-            href: location.href,
-            origin: SHELL_ORIGIN,
             readySent: !!lastReady,
             listeners: listeners.length,
             directHandle: directShellReceiver() ? "function" : "missing",
@@ -90,9 +88,18 @@
 
     function beacon(reason) {
         try {
+            var token = "";
+            try {
+                token = new URLSearchParams(window.parent.location.hash.slice(1)).get("capability") || "";
+            } catch (e) {
+                // A detached frame cannot report diagnostics.
+            }
             fetch("/api/diag", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-SkimDown-Capability": token,
+                },
                 body: JSON.stringify(snapshot(reason)),
             }).catch(function () {
                 // Diagnostics must never break the renderer.
@@ -261,11 +268,11 @@
             try {
                 apply();
             } catch (e) {
-                report.failures.push(name + ": " + ((e && e.message) || e));
+                report.failures.push((name + ": " + ((e && e.message) || e)).slice(0, 256));
                 return;
             }
             if (shimInstalled()) report.strategy = name;
-            else report.failures.push(name + ": no effect");
+            else report.failures.push((name + ": no effect").slice(0, 256));
         }
 
         // 1. The ordinary case: `webview` is absent, or present but replaceable.

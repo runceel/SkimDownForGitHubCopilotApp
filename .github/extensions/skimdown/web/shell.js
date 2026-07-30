@@ -18,6 +18,7 @@
     var ZOOM_MAX = 3.0;
     var ZOOM_STEP = 1.1;
     var CONTENT_WIDTHS = ["760px", "960px", "1200px", "none"];
+    var capabilityToken = new URLSearchParams(window.location.hash.slice(1)).get("capability") || "";
 
     var el = {
         body: document.body,
@@ -163,14 +164,9 @@
     function describeRenderer() {
         var info = { retried: handshakeRetried, logs: rendererLogs.slice(0, 6) };
         try {
-            info.href = el.preview.contentWindow ? el.preview.contentWindow.location.href : null;
-        } catch (e) {
-            info.href = "blocked:" + e.name;
-        }
-        try {
             var doc = el.preview.contentDocument;
-            info.readyState = doc ? doc.readyState : null;
-            info.bodyChildren = doc && doc.body ? doc.body.children.length : null;
+            if (doc) info.readyState = doc.readyState;
+            if (doc && doc.body) info.bodyChildren = doc.body.children.length;
             info.hasBridge = !!(el.preview.contentWindow && el.preview.contentWindow.chrome
                 && el.preview.contentWindow.chrome.webview);
         } catch (e) {
@@ -214,7 +210,6 @@
         var payload = describeRenderer();
         payload.reason = reason;
         payload.from = "shell";
-        payload.shellOrigin = window.location.origin;
         payload.nested = window.parent !== window;
         // Best effort: diagnostics must never break the shell.
         api("/api/diag", payload).catch(noop);
@@ -235,9 +230,7 @@
         api("/api/diag", {
             reason: "shell-boot",
             from: "shell",
-            shellOrigin: window.location.origin,
-            nested: window.parent !== window,
-            userAgent: navigator.userAgent
+            nested: window.parent !== window
         }).catch(noop);
     }
 
@@ -316,7 +309,7 @@
     }
 
     function recordRendererLog(text) {
-        var line = String(text == null ? "" : text).slice(0, 400);
+        var line = String(text == null ? "" : text).slice(0, 256);
         if (!line) return;
         if (rendererLogs.indexOf(line) < 0) rendererLogs.push(line);
         if (rendererLogs.length > 12) rendererLogs.shift();
@@ -606,9 +599,14 @@
     // ---------- server transport ----------
 
     function api(path, body) {
+        var headers;
+        if (body !== undefined) {
+            headers = { "Content-Type": "application/json" };
+            if (path === "/api/diag") headers["X-SkimDown-Capability"] = capabilityToken;
+        }
         return fetch(path, {
             method: body === undefined ? "GET" : "POST",
-            headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+            headers: headers,
             body: body === undefined ? undefined : JSON.stringify(body),
         }).then(function (res) {
             return res.json().catch(function () {
