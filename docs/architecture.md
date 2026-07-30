@@ -159,8 +159,11 @@ ephemeral であり、再接続後の調査には残らない。
 
 ## 実装者が守る不変条件
 
-1. `skimdown.css`、`vendor/**` は、採用した SkimDownForWindows の上流リビジョンからの
-   バイト単位コピーとする。`renderer.js` も上流同期を原則とするが、安全な上流リビジョンを
+1. `skimdown.css` と通常の `vendor/**` 更新は、採用した SkimDownForWindows の上流リビジョン
+   からのバイト単位コピーとする。緊急の依存物修正は、公式 release の immutable な取得元を
+   個別に固定してよい。vendored 実行資産は取得元、ファイル単位の SHA-256、依存コンポーネント
+   情報で固定し、repository 内と固定取得元の両方に対して CI で検証する。
+   `renderer.js` も上流同期を原則とするが、安全な上流リビジョンを
    待てない脆弱性には、回帰テスト付きの最小限のローカル hardening patch を許可する。
    上流へ修正が入った時点で差分を解消し、再び上流コピーへ戻す。
 2. canvas の frame はすでに WebView2 内で動き、`window.chrome.webview` はホストに

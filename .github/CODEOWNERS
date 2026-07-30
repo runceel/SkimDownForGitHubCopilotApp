@@ -1,0 +1,5 @@
+# A checked-out extension is executable code, so extension and supply-chain
+# control changes require an explicit maintainer review.
+/.github/extensions/** @runceel
+/.github/workflows/** @runceel
+/.github/CODEOWNERS @runceel

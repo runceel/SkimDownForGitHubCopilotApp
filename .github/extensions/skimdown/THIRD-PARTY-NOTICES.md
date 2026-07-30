@@ -25,6 +25,10 @@ repository. This repository may carry narrowly scoped security hardening in
 
 Each project's full license text is available in its repository at the version listed above.
 
+Exact file hashes, the pinned upstream revision, official package sources, and the generated
+CycloneDX inventory are recorded in
+[`vendor-lock.json`](vendor-lock.json) and [`vendor-sbom.cdx.json`](vendor-sbom.cdx.json).
+
 The vendored DOMPurify bundle was downloaded from the upstream
 [`3.4.12` release](https://github.com/cure53/DOMPurify/releases/download/3.4.12/purify.min.js).
 Its SHA-256 digest is

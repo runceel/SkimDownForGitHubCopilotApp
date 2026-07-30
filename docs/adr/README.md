@@ -51,3 +51,4 @@ ADR は、SkimDown canvas 拡張の**全体アーキテクチャに関する判�
 | [0006](0006-allow-bounded-local-renderer-security-hardening.md) | Accepted | 互換レイヤー背後の上流同期を維持しつつ、緊急の renderer hardening を限定的に許可する |
 | [0007](0007-protect-loopback-apis-with-instance-capabilities.md) | Accepted | loopback API をインスタンス capability とブラウザー要求境界で保護する |
 | [0008](0008-isolate-renderer-origin-and-capabilities.md) | Accepted | renderer を sandbox と専用 origin へ隔離し、通信と資源取得を最小権限にする |
+| [0009](0009-pin-and-verify-vendored-executable-assets.md) | Accepted | vendored 実行資産の取得元と byte 列を固定して検証する |

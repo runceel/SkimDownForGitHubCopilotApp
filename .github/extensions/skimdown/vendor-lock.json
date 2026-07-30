@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/runceel/SkimDownForWindows",
+    "revision": "fe85a6cf6faa1f1f79bdc8ee877f0c3cc415a670",
+    "path": "src/SkimDownForWindows/Assets/Web/vendor",
+    "downloadBase": "https://raw.githubusercontent.com/runceel/SkimDownForWindows/{revision}/src/SkimDownForWindows/Assets/Web/vendor/"
+  },
+  "components": {
+    "dompurify": {
+      "version": "3.4.12",
+      "license": "Apache-2.0 OR MPL-2.0",
+      "homepage": "https://github.com/cure53/DOMPurify",
+      "purl": "pkg:npm/dompurify@3.4.12",
+      "officialSource": "https://github.com/cure53/DOMPurify/releases/download/3.4.12/purify.min.js"
+    },
+    "highlight.js": {
+      "version": "11.10.0",
+      "license": "BSD-3-Clause",
+      "homepage": "https://github.com/highlightjs/highlight.js",
+      "purl": "pkg:npm/highlight.js@11.10.0",
+      "officialSource": "https://registry.npmjs.org/highlight.js/-/highlight.js-11.10.0.tgz"
+    },
+    "katex": {
+      "version": "0.16.22",
+      "license": "MIT AND OFL-1.1",
+      "homepage": "https://github.com/KaTeX/KaTeX",
+      "purl": "pkg:npm/katex@0.16.22",
+      "officialSource": "https://registry.npmjs.org/katex/-/katex-0.16.22.tgz"
+    },
+    "markdown-it": {
+      "version": "14.1.0",
+      "license": "MIT",
+      "homepage": "https://github.com/markdown-it/markdown-it",
+      "purl": "pkg:npm/markdown-it@14.1.0",
+      "officialSource": "https://registry.npmjs.org/markdown-it/-/markdown-it-14.1.0.tgz"
+    },
+    "markdown-it-emoji": {
+      "version": "3.0.0",
+      "license": "MIT",
+      "homepage": "https://github.com/markdown-it/markdown-it-emoji",
+      "purl": "pkg:npm/markdown-it-emoji@3.0.0",
+      "officialSource": "https://registry.npmjs.org/markdown-it-emoji/-/markdown-it-emoji-3.0.0.tgz"
+    },
+    "markdown-it-footnote": {
+      "version": "4.0.0",
+      "license": "MIT",
+      "homepage": "https://github.com/markdown-it/markdown-it-footnote",
+      "purl": "pkg:npm/markdown-it-footnote@4.0.0",
+      "officialSource": "https://registry.npmjs.org/markdown-it-footnote/-/markdown-it-footnote-4.0.0.tgz"
+    },
+    "markdown-it-imsize": {
+      "version": "2.0.1",
+      "license": "MIT",
+      "homepage": "https://github.com/tatsy/markdown-it-imsize",
+      "purl": "pkg:npm/markdown-it-imsize@2.0.1",
+      "officialSource": "https://registry.npmjs.org/markdown-it-imsize/-/markdown-it-imsize-2.0.1.tgz"
+    },
+    "mermaid": {
+      "version": "11.15.0",
+      "license": "MIT",
+      "homepage": "https://github.com/mermaid-js/mermaid",
+      "purl": "pkg:npm/mermaid@11.15.0",
+      "officialSource": "https://registry.npmjs.org/mermaid/-/mermaid-11.15.0.tgz"
+    }
+  },
+  "files": [
+    { "path": "dompurify.min.js", "component": "dompurify", "source": "https://raw.githubusercontent.com/cure53/DOMPurify/a9ca1e537422319a557a9a2aa61f003b23b4a197/dist/purify.min.js", "sha256": "c45ba939765574f96cbf35ee9b6d89f73756a17921814425e74b82f7c54603ce" },
+    { "path": "github-dark.min.css", "component": "highlight.js", "sha256": "ee2461da81ff8bd1f4418691ab06cc93d5c9c7a77f244ae3d6e65188127b576f" },
+    { "path": "github.min.css", "component": "highlight.js", "sha256": "d1e528743a74aa68cc837c18c1347bb0fd7f3261d3622c9787b111628bfa7333" },
+    { "path": "highlight.min.js", "component": "highlight.js", "sha256": "471ef9ae90c407af440fcdc48edfeeb562106b3267bd12d99071c162fb52ed32" },
+    { "path": "katex/auto-render.min.js", "component": "katex", "sha256": "e5372d199bcdae8b4de71d0f7ceba72a4ba12774a27c60a6f1f77d03b3228ee4" },
+    { "path": "katex/fonts/KaTeX_AMS-Regular.woff2", "component": "katex", "sha256": "0cdd387c9590a1a9f9794560022dbb59654a7d86f187aa0c81495ad42d3a7308" },
+    { "path": "katex/fonts/KaTeX_Caligraphic-Bold.woff2", "component": "katex", "sha256": "de7701e42cf1f4cf0b766c03fb27977207eee2f4fd5d76fa82188406da43ea4c" },
+    { "path": "katex/fonts/KaTeX_Caligraphic-Regular.woff2", "component": "katex", "sha256": "5d53e70ad607c2352162dec9e0923fb54ecdafaccbf604cd8dcf7d00facb989b" },
+    { "path": "katex/fonts/KaTeX_Fraktur-Bold.woff2", "component": "katex", "sha256": "74444efd593c005e3f4573b44524704c0af0a937fe911cca9e94068d0d140d3f" },
+    { "path": "katex/fonts/KaTeX_Fraktur-Regular.woff2", "component": "katex", "sha256": "51814d270d06ff0255dba0799994fa4d8c84d11f09951d47595f4abb1f3602dc" },
+    { "path": "katex/fonts/KaTeX_Main-Bold.woff2", "component": "katex", "sha256": "0f60d1b897938ec918c8ce073092411baf9438f6739465693ff18b0f9d20b021" },
+    { "path": "katex/fonts/KaTeX_Main-BoldItalic.woff2", "component": "katex", "sha256": "99cd42a3c072d918f2f44984a807cf7aa16e13545fd0875fc07c6c65f99e715b" },
+    { "path": "katex/fonts/KaTeX_Main-Italic.woff2", "component": "katex", "sha256": "97479ca6cce906abc961ecac96faa5f9ca2e61b8e7670d475826bcdee9a7c267" },
+    { "path": "katex/fonts/KaTeX_Main-Regular.woff2", "component": "katex", "sha256": "c2342cd8b869e01752a9321dc17213fc40d4d04c79688c1d43f2cf316abd7866" },
+    { "path": "katex/fonts/KaTeX_Math-BoldItalic.woff2", "component": "katex", "sha256": "dc47344dbb6cb5b655c8460d561f4df5f501b90c804ad3c6cec65fe322351ab1" },
+    { "path": "katex/fonts/KaTeX_Math-Italic.woff2", "component": "katex", "sha256": "7af58c5ec8f132a2ddde9027c6d7814decce4d3b822a11192a42a20e2e973264" },
+    { "path": "katex/fonts/KaTeX_SansSerif-Bold.woff2", "component": "katex", "sha256": "e99ae51144bf1232efcc1bfe5add36262c6866b0faab24fa75740e1b98577a62" },
+    { "path": "katex/fonts/KaTeX_SansSerif-Italic.woff2", "component": "katex", "sha256": "00b26ac825e2095056396e0553b8ac26d3f8ad158c3826e28b4c45b385c4714a" },
+    { "path": "katex/fonts/KaTeX_SansSerif-Regular.woff2", "component": "katex", "sha256": "68e8c73ef42afd3ccec58bf0fba302cce448938e7fc020a5e31f8a952eee1342" },
+    { "path": "katex/fonts/KaTeX_Script-Regular.woff2", "component": "katex", "sha256": "036d4e95149b69ff9bcc0cd55771efeb25ffa3947293e69acd78d5ac328c684b" },
+    { "path": "katex/fonts/KaTeX_Size1-Regular.woff2", "component": "katex", "sha256": "6b47c40166b6dbe21a5dfca7718413f2147fd2399be1ba605d8ad39cedf25dfe" },
+    { "path": "katex/fonts/KaTeX_Size2-Regular.woff2", "component": "katex", "sha256": "d04c54219f9eaec6d4d4fd42dfb28785975a4794d6b2fc71e566b9cd6db842dd" },
+    { "path": "katex/fonts/KaTeX_Size3-Regular.woff2", "component": "katex", "sha256": "73d591271b1604960cb10bb90fee021670af7297017e0e98480b332d11f51995" },
+    { "path": "katex/fonts/KaTeX_Size4-Regular.woff2", "component": "katex", "sha256": "a4af7d414440a1c1790825cfb700cf9cf43b0f2c4b04f0ebc523011ad9853ec0" },
+    { "path": "katex/fonts/KaTeX_Typewriter-Regular.woff2", "component": "katex", "sha256": "71d517d67827787cfabdf186914cc3358eda539e37931941f2b2fd4a21f68c0b" },
+    { "path": "katex/katex.min.css", "component": "katex", "sha256": "b075123b50e51a0a7819b49efa2a62bb05bc7dac04b0d65a9a3799c2211ea48f" },
+    { "path": "katex/katex.min.js", "component": "katex", "sha256": "e8d885505949f3a5f4abdd5dd0d53696bd1371ad26ffbf4f310dcd77c8cdae89" },
+    { "path": "markdown-it-emoji.min.js", "component": "markdown-it-emoji", "sha256": "84486c9d5a51b28aa90c5a3cb2625473dbde2415e2e106f8f40ea617de66dae0" },
+    { "path": "markdown-it-footnote.min.js", "component": "markdown-it-footnote", "sha256": "d6fee58a3b56c5742fa18f3e01f1d317cc99975683ebd39c9195cb2aff0c2e42" },
+    { "path": "markdown-it-imsize.min.js", "component": "markdown-it-imsize", "sha256": "6480df65b2cd1b5ea78fe3ddc77191d5eac2e81208575d0bdf43be45e4087a68" },
+    { "path": "markdown-it.min.js", "component": "markdown-it", "sha256": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68" },
+    { "path": "mermaid/mermaid.min.js", "component": "mermaid", "sha256": "70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de" }
+  ]
+}
