@@ -6,6 +6,7 @@
  *
  * Message in:
  *   { type: "render", markdown, sourcePath, contentBaseUri,
+ *                     remoteContentId, remoteContentToken,
  *                     theme, themeType, themeIsDark, themeVars }
  *   { type: "theme",  theme, themeType, themeIsDark, themeVars } // theme: "system"|"light"|"dark"|"custom"
  *   { type: "zoom",   factor }           // 0.5..3.0
@@ -25,6 +26,8 @@
  *   { type: "shortcut", id }   // keyboard accelerator forwarded from WebView2
  *                              // because WebView2's child HWND swallows keys
  *                              // before WinUI's KeyboardAccelerator sees them.
+ *   { type: "remoteContent", documentId, blocked, proxied, policyBlocked, hosts }
+ *   { type: "remoteContent/error", documentId }
  */
 
 (function () {
@@ -34,8 +37,7 @@
     var contentEl = null;
     var currentSourceDir = "";
     var currentContentBaseUri = "";
-    var lastRenderedMarkdown = "";
-    var lastRenderedHtml = "";
+    var currentRemoteContentId = "";
     var currentTheme = "light";       // "light" | "dark" | "custom"
     var currentThemeType = "light";   // "light" | "dark" — drives hljs + Mermaid choice
     var currentThemeIsDark = false;
@@ -1544,11 +1546,15 @@
         applyZoomDelta(normalizeWheelDeltaY(ev));
     }
 
-    function rewriteRelativeUrls(html) {
-        if (!currentContentBaseUri || !currentSourceDir) return html;
-        // Use a DOM walker to rewrite src/href that look like relative paths.
-        var tmp = document.createElement("div");
-        tmp.innerHTML = html;
+    function rewriteResourceUrls(root, remoteContentToken) {
+        var summary = {
+            blocked: 0,
+            proxied: 0,
+            policyBlocked: 0,
+            hosts: []
+        };
+        // The root has already been sanitized and is still detached from the
+        // live document, so URL rewriting cannot activate untrusted markup.
 
         function isAbsolute(u) {
             return /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(u);
@@ -1567,13 +1573,115 @@
             }
         }
 
-        tmp.querySelectorAll("img[src]").forEach(function (el) {
-            var src = el.getAttribute("src");
-            if (!src || isAbsolute(src)) return;
-            el.setAttribute("src", resolveOn(currentContentBaseUri, currentSourceDir, src));
+        function parseRemote(raw) {
+            var url;
+            try {
+                url = new URL(raw, window.location.href);
+            } catch (e) {
+                return null;
+            }
+            if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+            if (url.origin === window.location.origin) return null;
+            if (currentContentBaseUri) {
+                try {
+                    if (url.origin === new URL(currentContentBaseUri).origin) return null;
+                } catch (e) {
+                    // A malformed content base is not a reason to allow a URL.
+                }
+            }
+            return url;
+        }
+
+        function isPrivateLiteral(url) {
+            var host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+            if (!host || host === "localhost" || /\.localhost$|\.local$|\.internal$|\.home$|\.lan$/.test(host)) {
+                return true;
+            }
+            if (host.indexOf(".") < 0 && host.indexOf(":") < 0) return true;
+
+            var ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+            if (ipv4) {
+                var a = Number(ipv4[1]);
+                var b = Number(ipv4[2]);
+                if (a === 0 || a === 10 || a === 127 || a >= 224) return true;
+                if (a === 100 && b >= 64 && b <= 127) return true;
+                if (a === 169 && b === 254) return true;
+                if (a === 172 && b >= 16 && b <= 31) return true;
+                if (a === 192 && b === 168) return true;
+                if (a === 198 && (b === 18 || b === 19)) return true;
+            }
+
+            if (host.indexOf(":") >= 0) {
+                if (host === "::" || host === "::1") return true;
+                if (/^(fc|fd|fe[89ab]|ff)/i.test(host)) return true;
+            }
+            return false;
+        }
+
+        function rememberHost(url) {
+            if (summary.hosts.indexOf(url.hostname) < 0 && summary.hosts.length < 8) {
+                summary.hosts.push(url.hostname);
+            }
+        }
+
+        function rewriteAttribute(el, name) {
+            var raw = el.getAttribute(name);
+            if (!raw) return;
+
+            if (!isAbsolute(raw) && currentContentBaseUri && currentSourceDir) {
+                raw = resolveOn(currentContentBaseUri, currentSourceDir, raw);
+                el.setAttribute(name, raw);
+            }
+
+            var remote = parseRemote(raw);
+            if (!remote) return;
+            rememberHost(remote);
+            el.setAttribute("referrerpolicy", "no-referrer");
+
+            if (!remoteContentToken) {
+                el.removeAttribute(name);
+                el.setAttribute("data-remote-blocked", "true");
+                summary.blocked += 1;
+                return;
+            }
+            if (isPrivateLiteral(remote)) {
+                el.removeAttribute(name);
+                el.setAttribute("data-remote-policy-blocked", "true");
+                summary.policyBlocked += 1;
+                return;
+            }
+
+            el.setAttribute(
+                name,
+                "/remote-content?token=" + encodeURIComponent(remoteContentToken) +
+                    "&url=" + encodeURIComponent(remote.toString()));
+            el.setAttribute("data-remote-resource", "true");
+            summary.proxied += 1;
+        }
+
+        root.querySelectorAll("[src], [poster], [background]").forEach(function (el) {
+            if (el.hasAttribute("src")) rewriteAttribute(el, "src");
+            if (el.hasAttribute("poster")) rewriteAttribute(el, "poster");
+            if (el.hasAttribute("background")) rewriteAttribute(el, "background");
         });
 
-        return tmp.innerHTML;
+        // srcset can trigger a request independently of src. Remove it whenever
+        // it names a remote URL; when it is the only source, use its first URL as
+        // the consent-controlled fallback.
+        root.querySelectorAll("img[srcset], source[srcset]").forEach(function (el) {
+            var srcset = el.getAttribute("srcset") || "";
+            var firstRemote = srcset.match(/(?:^|,\s*)((?:https?:)?\/\/[^\s,]+)/i);
+            if (!firstRemote) return;
+            el.removeAttribute("srcset");
+            if (!el.hasAttribute("src")) {
+                el.setAttribute("src", firstRemote[1]);
+                rewriteAttribute(el, "src");
+            } else if (!remoteContentToken) {
+                summary.blocked += 1;
+            }
+        });
+
+        return summary;
     }
 
     // KaTeX emits MathML + a parallel HTML span tree under .katex root. Allow
@@ -1621,13 +1729,35 @@
         });
     }
 
-    function render(markdown, sourcePath, contentBaseUri, theme, themeType, themeIsDark, themeVars) {
+    function sanitizeRenderedHtml(html) {
+        if (!window.DOMPurify) {
+            var fallback = document.createDocumentFragment();
+            var error = document.createElement("div");
+            error.className = "skim-error";
+            error.textContent = "Markdown rendering unavailable: sanitizer failed to load.";
+            fallback.appendChild(error);
+            return fallback;
+        }
+
+        return window.DOMPurify.sanitize(html, {
+            RETURN_DOM_FRAGMENT: true,
+            USE_PROFILES: { html: true, mathMl: true },
+            ADD_TAGS: KATEX_TAGS.concat(["button"]),
+            ADD_ATTR: KATEX_ATTRS.concat(["target", "rel", "id", "type", "aria-label", "data-source", "width", "height", "checked", "disabled"]),
+            ALLOW_DATA_ATTR: true,
+            FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form"],
+            FORBID_ATTR: ["onerror", "onload", "onclick"],
+        });
+    }
+
+    function render(markdown, sourcePath, contentBaseUri, remoteContentId, remoteContentToken, theme, themeType, themeIsDark, themeVars) {
         if (typeof markdown !== "string") markdown = "";
         // If the user switches to another file while the zoom modal is open,
         // the clone in the modal now points at a diagram that's about to be
         // detached. Close the modal so we never leave a stale view on top.
         if (isZoomModalOpen()) closeZoomModal();
         currentContentBaseUri = contentBaseUri || "";
+        currentRemoteContentId = remoteContentId || "";
         // sourceDir is the relative folder portion of sourcePath, forward-slash form.
         currentSourceDir = "";
         if (sourcePath && typeof sourcePath === "string") {
@@ -1646,22 +1776,17 @@
             raw = '<div class="skim-error">Markdown render failed: ' + escapeHtml(String(e)) + '</div>';
         }
 
-        raw = rewriteRelativeUrls(raw);
-
-        var clean = window.DOMPurify
-            ? window.DOMPurify.sanitize(raw, {
-                  USE_PROFILES: { html: true, mathMl: true },
-                  ADD_TAGS: KATEX_TAGS.concat(["button"]),
-                  ADD_ATTR: KATEX_ATTRS.concat(["target", "rel", "id", "type", "aria-label", "data-source", "width", "height", "checked", "disabled"]),
-                  ALLOW_DATA_ATTR: true,
-                  FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form"],
-                  FORBID_ATTR: ["onerror", "onload", "onclick"],
-              })
-            : raw;
-
-        lastRenderedMarkdown = markdown;
-        lastRenderedHtml = clean;
-        contentEl.innerHTML = clean;
+        var clean = sanitizeRenderedHtml(raw);
+        var resourceSummary = rewriteResourceUrls(clean, remoteContentToken);
+        contentEl.replaceChildren(clean);
+        postToHost({
+            type: "remoteContent",
+            documentId: currentRemoteContentId,
+            blocked: resourceSummary.blocked,
+            proxied: resourceSummary.proxied,
+            policyBlocked: resourceSummary.policyBlocked,
+            hosts: resourceSummary.hosts
+        });
 
         // DOMPurify strips `data-source` on <pre class="mermaid"> when the
         // value contains characters it flags as risky (e.g. raw `>`), so
@@ -2084,6 +2209,11 @@
     function onReady() {
         contentEl = document.getElementById("content");
         contentEl.addEventListener("click", handleClick, true);
+        contentEl.addEventListener("error", function (ev) {
+            var target = ev.target;
+            if (!target || !target.getAttribute || target.getAttribute("data-remote-resource") !== "true") return;
+            postToHost({ type: "remoteContent/error", documentId: currentRemoteContentId });
+        }, true);
 
         // Capture-phase so we see the key before any child handler can
         // swallow it (e.g. KaTeX-rendered widgets).
@@ -2119,6 +2249,8 @@
                             msg.markdown,
                             msg.sourcePath,
                             msg.contentBaseUri,
+                            msg.remoteContentId,
+                            msg.remoteContentToken,
                             msg.theme,
                             msg.themeType,
                             msg.themeIsDark,

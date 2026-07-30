@@ -5,8 +5,8 @@
  *
  *   extension  <-- fetch / SSE -->  shell  <-- postMessage -->  renderer iframe
  *
- * The renderer is SkimDown for Windows' renderer.js, copied unmodified; it
- * still speaks the WebView2 protocol, which bridge.js maps onto postMessage.
+ * The renderer follows SkimDown for Windows' WebView2 protocol, which bridge.js
+ * maps onto postMessage. This port additionally enforces remote-content consent.
  * Theme tokens are only injected into this document, so we translate them into
  * SkimDown's --skim-* variables and hand them over as `themeVars`.
  */
@@ -18,6 +18,7 @@
     var ZOOM_MAX = 3.0;
     var ZOOM_STEP = 1.1;
     var CONTENT_WIDTHS = ["760px", "960px", "1200px", "none"];
+    var CAPABILITY_TOKEN = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
 
     var el = {
         body: document.body,
@@ -37,6 +38,7 @@
         btnToggleSidebar: document.getElementById("btn-toggle-sidebar"),
         docTitle: document.getElementById("doc-title"),
         docSubtitle: document.getElementById("doc-subtitle"),
+        btnOpenBrowser: document.getElementById("btn-open-browser"),
         btnFind: document.getElementById("btn-find"),
         btnZoomIn: document.getElementById("btn-zoom-in"),
         btnZoomOut: document.getElementById("btn-zoom-out"),
@@ -54,6 +56,9 @@
         btnPathOpen: document.getElementById("btn-path-open"),
         btnPathCancel: document.getElementById("btn-path-cancel"),
         linkbar: document.getElementById("linkbar"),
+        remotebar: document.getElementById("remotebar"),
+        remoteText: document.getElementById("remote-text"),
+        btnRemoteLoad: document.getElementById("btn-remote-load"),
         deadbar: document.getElementById("deadbar"),
         deadbarText: document.getElementById("deadbar-text"),
         btnDeadReload: document.getElementById("btn-dead-reload"),
@@ -80,6 +85,8 @@
         expandedRoot: null,
         search: { query: "", caseSensitive: false },
         pendingExternalHref: null,
+        remoteContentFailures: 0,
+        rendererOrigin: null,
         rendererReady: false,
         rendererQueue: [],
         visibleNodes: [],      // flat list of focusable sidebar buttons
@@ -87,26 +94,60 @@
 
     // ---------- renderer messaging ----------
 
-    /* `renderer.html` is loaded from a relative URL, so the preview frame is
-     * always same-origin and the two documents can call each other directly.
-     * That is strictly more reliable than `postMessage` — no listener-timing
-     * race, no `targetOrigin` mismatch, nothing to lose during a frame swap —
-     * so it is the primary transport and `postMessage` is only the fallback
-     * for the (unexpected) case where the bridge handle is unreachable. */
+    var HANDSHAKE_GRACE_MS = 6000;
+    var HANDSHAKE_POLL_MS = 250;
+    var RENDERER_SHORTCUTS = new Set([
+        "find",
+        "find-next",
+        "find-prev",
+        "use-selection-for-find",
+        "toggle-sidebar",
+        "zoom-in",
+        "zoom-out",
+        "zoom-reset",
+        "content-width-wider",
+        "content-width-narrower",
+        "select-all",
+        "open-folder",
+    ]);
+    var handshakeTimer = 0;
+    var handshakePoll = 0;
+    var handshakeRetried = false;
+    var rendererLogs = [];
+
+    function ensureRendererFrame(baseUri) {
+        var url;
+        try {
+            url = new URL("renderer.html", String(baseUri || ""));
+            if (url.protocol !== "http:" || url.hostname !== "127.0.0.1") {
+                throw new Error("renderer origin must be loopback HTTP");
+            }
+            if (url.origin === window.location.origin) {
+                throw new Error("renderer origin must differ from shell origin");
+            }
+        } catch (error) {
+            showDeadBar(true, "プレビューの安全な接続先を初期化できませんでした。");
+            reportDiag("renderer-origin-invalid");
+            return false;
+        }
+
+        url.searchParams.set("parentOrigin", window.location.origin);
+        if (state.rendererOrigin === url.origin && el.preview.src === url.href) return true;
+
+        stopHandshakeWatch();
+        state.rendererOrigin = url.origin;
+        state.rendererReady = false;
+        handshakeRetried = false;
+        rendererLogs = [];
+        el.preview.src = url.href;
+        return true;
+    }
+
     function deliverToRenderer(message) {
         var frame = el.preview.contentWindow;
-        if (!frame) return false;
+        if (!frame || !state.rendererOrigin) return false;
         try {
-            var bridge = frame.__skimBridge;
-            if (bridge && typeof bridge.deliver === "function") {
-                bridge.deliver(message);
-                return true;
-            }
-        } catch (e) {
-            // Unreachable handle; try the message channel instead.
-        }
-        try {
-            frame.postMessage({ __skim: true, payload: message }, window.location.origin);
+            frame.postMessage({ __skim: true, payload: message }, state.rendererOrigin);
             return true;
         } catch (e) {
             return false;
@@ -127,135 +168,121 @@
         for (var i = 0; i < queued.length; i++) postToRenderer(queued[i]);
     }
 
-    /* The renderer's half of the direct transport. It has to exist before the
-     * frame boots, hence the assignment at script-evaluation time. */
-    window.__skimShellReceive = function (payload) {
-        handleRendererMessage(payload);
-    };
-
     window.addEventListener("message", function (ev) {
-        if (ev.origin !== window.location.origin) return;
-        if (!ev.data || ev.data.__skim !== true) return;
         if (ev.source !== el.preview.contentWindow) return;
+        if (!state.rendererOrigin || ev.origin !== state.rendererOrigin) return;
+        if (!ev.data || ev.data.__skim !== true) return;
+        if (!isRendererMessage(ev.data.payload)) return;
         handleRendererMessage(ev.data.payload);
     });
 
-    /**
-     * The renderer announces itself with a `ready` post once `renderer.js` has
-     * booted, and everything the shell sends is queued until then — so a lost
-     * or never-sent `ready` leaves the preview permanently blank.
-     *
-     * Rather than trusting that notification to arrive, the shell *asks*: the
-     * frame is same-origin, so `__skimBridge.isReady()` is authoritative and
-     * can be polled. The iframe `load` event fires after deferred scripts run,
-     * so by then a healthy renderer has already answered. Polling past that
-     * only covers a renderer that boots unusually late.
-     */
-    var HANDSHAKE_GRACE_MS = 6000;
-    var HANDSHAKE_POLL_MS = 250;
-    var handshakeTimer = 0;
-    var handshakePoll = 0;
-    var handshakeRetried = false;
-    var rendererLogs = [];
-
-    function rendererBridge() {
-        try {
-            var frame = el.preview.contentWindow;
-            return (frame && frame.__skimBridge) || null;
-        } catch (e) {
-            return null;
+    function isRendererMessage(msg) {
+        if (!msg || typeof msg !== "object") return false;
+        switch (msg.type) {
+            case "ready":
+                return true;
+            case "diagnostic":
+                return !!msg.report && typeof msg.report === "object";
+            case "log":
+                return typeof msg.text === "string" && msg.text.length <= 256;
+            case "link":
+                return typeof msg.href === "string"
+                    && msg.href.length <= 8192
+                    && ["anchor", "external", "relative"].indexOf(msg.kind) >= 0;
+            case "search/result":
+                return Number.isFinite(msg.total) && Number.isFinite(msg.current);
+            case "copy":
+                return typeof msg.text === "string" && msg.text.length <= 2 * 1024 * 1024;
+            case "shortcut":
+                return RENDERER_SHORTCUTS.has(msg.id);
+            case "zoomChanged":
+                return Number.isFinite(msg.factor);
+            case "remoteContent":
+                return /^[a-f0-9]{64}$/.test(msg.documentId || "")
+                    && Number.isInteger(msg.blocked) && msg.blocked >= 0 && msg.blocked <= 10000
+                    && Number.isInteger(msg.proxied) && msg.proxied >= 0 && msg.proxied <= 10000
+                    && Number.isInteger(msg.policyBlocked) && msg.policyBlocked >= 0 && msg.policyBlocked <= 10000
+                    && Array.isArray(msg.hosts) && msg.hosts.length <= 8
+                    && msg.hosts.every(function (host) {
+                        return typeof host === "string" && host.length <= 255;
+                    });
+            case "remoteContent/error":
+                return /^[a-f0-9]{64}$/.test(msg.documentId || "");
+            default:
+                return false;
         }
     }
 
     function describeRenderer() {
-        var info = { retried: handshakeRetried, logs: rendererLogs.slice(0, 6) };
-        try {
-            info.href = el.preview.contentWindow ? el.preview.contentWindow.location.href : null;
-        } catch (e) {
-            info.href = "blocked:" + e.name;
-        }
-        try {
-            var doc = el.preview.contentDocument;
-            info.readyState = doc ? doc.readyState : null;
-            info.bodyChildren = doc && doc.body ? doc.body.children.length : null;
-            info.hasBridge = !!(el.preview.contentWindow && el.preview.contentWindow.chrome
-                && el.preview.contentWindow.chrome.webview);
-        } catch (e) {
-            info.docError = e.name;
-        }
-        var bridge = rendererBridge();
-        if (bridge) {
-            info.bridge = {
-                version: bridge.version,
-                isReady: bridge.isReady(),
-                install: bridge.install,
-            };
-            try {
-                info.rendererSnapshot = bridge.snapshot("shell-request");
-            } catch (e) {
-                info.snapshotError = e.name;
-            }
-        } else {
-            info.bridge = null;
-        }
-        return info;
+        return {
+            retried: handshakeRetried,
+            logs: rendererLogs.slice(0, 6)
+        };
     }
 
-    /** Short human-readable cause for the dead bar, so a screenshot is enough
-     *  to tell a blocked frame apart from a renderer that crashed on boot. */
     function rendererFailureHint() {
-        var bridge = rendererBridge();
-        if (!bridge) return "レンダラーのスクリプトが読み込まれていません";
-        var install = bridge.install;
-        if (install && install.strategy === "failed") {
-            return "レンダラーとの通信経路を確保できませんでした";
-        }
-        var errors = bridge.errors || [];
-        if (errors.length) return errors[0];
         if (rendererLogs.length) return rendererLogs[0];
-        if (!bridge.isReady()) return "レンダラーの初期化が完了しませんでした";
-        return "";
+        return "レンダラーの初期化が完了しませんでした";
     }
 
     function reportDiag(reason) {
         var payload = describeRenderer();
         payload.reason = reason;
         payload.from = "shell";
-        payload.shellOrigin = window.location.origin;
         payload.nested = window.parent !== window;
         // Best effort: diagnostics must never break the shell.
         api("/api/diag", payload).catch(noop);
     }
 
-    /* The app is itself WebView2-based, so `chrome.webview` already exists in
-     * the renderer frame and the bridge has to displace it. Getting that wrong
-     * is precisely what used to leave the preview blank, and which strategy
-     * won is not observable from the extension process — so record it once per
-     * shell, on success. Logged rather than persisted: this is a note about a
-     * healthy boot, not a fault. */
-    var bridgeInstallReported = false;
-
-    /* Fired unconditionally at shell startup. Without it, a panel still pointing
-     * at a port from a previous extension process is indistinguishable from a
-     * panel that loaded and then failed — both are simply silent. */
     function reportShellBoot() {
         api("/api/diag", {
             reason: "shell-boot",
             from: "shell",
-            shellOrigin: window.location.origin,
-            nested: window.parent !== window,
-            userAgent: navigator.userAgent
+            nested: window.parent !== window
         }).catch(noop);
     }
 
-    function reportBridgeInstall() {
-        if (bridgeInstallReported) return;
-        var bridge = rendererBridge();
-        var install = bridge && bridge.install;
-        if (!install) return;
-        bridgeInstallReported = true;
-        api("/api/diag", { reason: "bridge-installed", from: "shell", install: install })
-            .catch(noop);
+    function boundedText(value, length) {
+        return typeof value === "string" ? value.slice(0, length) : "";
+    }
+
+    function reportRendererDiagnostic(report) {
+        var errors = Array.isArray(report.errors)
+            ? report.errors.slice(0, 8).map(function (value) { return boundedText(value, 256); })
+            : [];
+        for (var i = 0; i < errors.length; i++) recordRendererLog(errors[i], false);
+
+        var install = report.install && typeof report.install === "object"
+            ? {
+                strategy: boundedText(report.install.strategy, 80),
+                failures: Array.isArray(report.install.failures)
+                    ? report.install.failures.slice(0, 8).map(function (value) {
+                        return boundedText(value, 256);
+                    })
+                    : [],
+            }
+            : null;
+        var vendors = report.vendors && typeof report.vendors === "object"
+            ? {
+                markdownit: boundedText(report.vendors.markdownit, 40),
+                hljs: boundedText(report.vendors.hljs, 40),
+                DOMPurify: boundedText(report.vendors.DOMPurify, 40),
+                katex: boundedText(report.vendors.katex, 40),
+                mermaid: boundedText(report.vendors.mermaid, 40),
+            }
+            : null;
+        api("/api/diag", {
+            reason: boundedText(report.reason, 80) || "renderer-diagnostic",
+            from: "renderer",
+            readySent: !!report.readySent,
+            listeners: Number.isFinite(report.listeners) ? report.listeners : null,
+            readyState: boundedText(report.readyState, 40),
+            bodyChildren: Number.isFinite(report.bodyChildren) ? report.bodyChildren : null,
+            contentChildren: Number.isFinite(report.contentChildren) ? report.contentChildren : null,
+            vendors: vendors,
+            install: install,
+            errors: errors,
+        }).catch(noop);
     }
 
     function stopHandshakeWatch() {
@@ -269,31 +296,17 @@
         }
     }
 
-    /** Adopt a renderer that booted without us hearing about it. */
-    function adoptReadyRenderer() {
-        if (state.rendererReady) return true;
-        var bridge = rendererBridge();
-        if (!bridge || !bridge.isReady()) return false;
-        handleRendererMessage({ type: "ready" });
-        return true;
-    }
-
     function watchHandshake() {
         stopHandshakeWatch();
         handshakePoll = setInterval(function () {
-            if (adoptReadyRenderer()) stopHandshakeWatch();
+            postDirect({ type: "hello" });
         }, HANDSHAKE_POLL_MS);
         handshakeTimer = setTimeout(function () {
-            if (adoptReadyRenderer()) {
-                stopHandshakeWatch();
-                return;
-            }
+            if (state.rendererReady) return;
             if (!handshakeRetried) {
                 handshakeRetried = true;
                 reportDiag("handshake-timeout-retrying");
-                // Force a fresh renderer document; a transient asset failure
-                // during the first boot is worth exactly one retry.
-                el.preview.src = el.preview.getAttribute("src");
+                el.preview.src = el.preview.src;
                 watchHandshake();
                 return;
             }
@@ -307,46 +320,38 @@
     }
 
     el.preview.addEventListener("load", function () {
-        if (state.rendererReady) return;
-        // `load` fires after the deferred renderer script has run, so a healthy
-        // frame can be adopted immediately without any message at all.
-        if (adoptReadyRenderer()) return;
-        // Otherwise prompt (in case `ready` was posted before this shell was
-        // listening) and keep watching.
+        if (!state.rendererOrigin || state.rendererReady) return;
         postDirect({ type: "hello" });
         watchHandshake();
     });
 
-    /** Post without the ready gate — used to re-drive the handshake itself. */
     function postDirect(message) {
         deliverToRenderer(message);
     }
 
-    function recordRendererLog(text) {
-        var line = String(text == null ? "" : text).slice(0, 400);
+    function recordRendererLog(text, persist) {
+        var line = String(text == null ? "" : text).slice(0, 256);
         if (!line) return;
         if (rendererLogs.indexOf(line) < 0) rendererLogs.push(line);
         if (rendererLogs.length > 12) rendererLogs.shift();
-        reportDiag("renderer-log");
+        if (persist !== false) reportDiag("renderer-log");
     }
 
     function handleRendererMessage(msg) {
-        if (!msg || typeof msg !== "object") return;
         switch (msg.type) {
             case "ready":
                 state.rendererReady = true;
                 stopHandshakeWatch();
                 showDeadBar(false);
-                reportBridgeInstall();
                 pushThemeToRenderer();
                 pushSettingsToRenderer();
                 flushRendererQueue();
                 if (state.doc) pushDocToRenderer(state.doc);
                 break;
+            case "diagnostic":
+                reportRendererDiagnostic(msg.report);
+                break;
             case "log":
-                // renderer.js reports its own uncaught errors here. The WinUI
-                // host wrote them to its debug log; dropping them on the floor
-                // is how a boot failure turns into an unexplained blank pane.
                 recordRendererLog(msg.text);
                 break;
             case "link":
@@ -364,6 +369,12 @@
             case "zoomChanged":
                 applyZoom(msg.factor, { fromRenderer: true });
                 break;
+            case "remoteContent":
+                handleRemoteContentMessage(msg);
+                break;
+            case "remoteContent/error":
+                handleRemoteContentError(msg);
+                break;
             default:
                 break;
         }
@@ -377,6 +388,8 @@
             markdown: doc.markdown || "",
             sourcePath: doc.sourcePath || "",
             contentBaseUri: doc.contentBaseUri || "",
+            remoteContentId: doc.remoteContentId || "",
+            remoteContentToken: doc.remoteContentToken || "",
             theme: theme.theme,
             themeType: theme.themeType,
             themeIsDark: theme.themeIsDark,
@@ -613,9 +626,11 @@
     // ---------- server transport ----------
 
     function api(path, body) {
+        var headers = { "X-SkimDown-Capability": CAPABILITY_TOKEN };
+        if (body !== undefined) headers["Content-Type"] = "application/json";
         return fetch(path, {
             method: body === undefined ? "GET" : "POST",
-            headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+            headers: headers,
             body: body === undefined ? undefined : JSON.stringify(body),
         }).then(function (res) {
             return res.json().catch(function () {
@@ -628,7 +643,7 @@
     }
 
     function connectEvents() {
-        var events = new EventSource("/events");
+        var events = new EventSource("/events?token=" + encodeURIComponent(CAPABILITY_TOKEN));
         var failures = 0;
 
         events.addEventListener("open", function () {
@@ -656,12 +671,14 @@
         events.addEventListener("doc", function (ev) {
             var doc = JSON.parse(ev.data);
             state.doc = doc;
+            resetRemoteContentUi();
             renderDocHeader(doc);
             el.emptyState.hidden = true;
             pushDocToRenderer(doc);
         });
         events.addEventListener("empty", function () {
             state.doc = null;
+            resetRemoteContentUi();
             renderDocHeader(null);
             el.emptyState.hidden = false;
             postToRenderer({ type: "empty" });
@@ -674,6 +691,7 @@
 
     function applyServerState(payload) {
         state.server = payload;
+        if (!ensureRendererFrame(payload.rendererBaseUri)) return;
         if (payload.settings) {
             var settingsChanged = !state.settings;
             state.settings = payload.settings;
@@ -1112,6 +1130,84 @@
         el.linkbar.hidden = true;
     }
 
+    // ---------- remote content ----------
+
+    function resetRemoteContentUi() {
+        state.remoteContentFailures = 0;
+        el.remotebar.hidden = true;
+        el.remoteText.textContent = "";
+        el.remoteText.title = "";
+        el.btnRemoteLoad.hidden = false;
+        el.btnRemoteLoad.disabled = false;
+    }
+
+    function handleRemoteContentMessage(msg) {
+        if (!state.doc || msg.documentId !== state.doc.remoteContentId) return;
+
+        var blocked = Number(msg.blocked) || 0;
+        var proxied = Number(msg.proxied) || 0;
+        var policyBlocked = Number(msg.policyBlocked) || 0;
+        if (blocked > 0) {
+            var hosts = Array.isArray(msg.hosts) && msg.hosts.length > 0
+                ? " (" + msg.hosts.join(", ") + ")"
+                : "";
+            el.remoteText.textContent =
+                "リモートコンテンツ " + blocked + " 件をブロックしました" + hosts +
+                "。読み込むと公開ネットワーク上の画像・メディアへ接続します。";
+            el.remoteText.title =
+                "許可はこの文書の現在の内容だけに適用されます。内容が変わると再度確認します。";
+            el.btnRemoteLoad.hidden = false;
+            el.remotebar.hidden = false;
+            return;
+        }
+
+        if (policyBlocked > 0) {
+            el.remoteText.textContent =
+                "リモートコンテンツ " + policyBlocked +
+                " 件は、loopback、link-local、プライベートネットワーク宛てのため読み込みませんでした。";
+            el.remoteText.title = "";
+            el.btnRemoteLoad.hidden = true;
+            el.remotebar.hidden = false;
+            return;
+        }
+
+        if (proxied > 0 && state.remoteContentFailures > 0) {
+            showRemoteContentFailure();
+            return;
+        }
+        el.remotebar.hidden = true;
+    }
+
+    function handleRemoteContentError(msg) {
+        if (!state.doc || msg.documentId !== state.doc.remoteContentId) return;
+        state.remoteContentFailures += 1;
+        showRemoteContentFailure();
+    }
+
+    function showRemoteContentFailure() {
+        el.remoteText.textContent =
+            "一部のリモートコンテンツを読み込めませんでした。プライベート IP、未対応形式、または通信エラーの可能性があります。";
+        el.remoteText.title = "";
+        el.btnRemoteLoad.hidden = true;
+        el.remotebar.hidden = false;
+    }
+
+    function allowRemoteContent() {
+        if (!state.doc || !state.doc.remoteContentId) return;
+        el.btnRemoteLoad.disabled = true;
+        api("/api/remote-content/allow", { documentId: state.doc.remoteContentId })
+            .then(function (result) {
+                if (!result.doc) return;
+                state.doc = result.doc;
+                resetRemoteContentUi();
+                pushDocToRenderer(result.doc);
+            })
+            .catch(function (error) {
+                el.btnRemoteLoad.disabled = false;
+                showError(error);
+            });
+    }
+
     // ---------- clipboard ----------
 
     function copyText(text) {
@@ -1454,6 +1550,14 @@
         saveSettings({ sidebarVisible: !state.settings.sidebarVisible }, true);
     });
 
+    el.btnOpenBrowser.addEventListener("click", function () {
+        api("/api/open-browser", {})
+            .then(function (result) {
+                if (!result.ok) showToast(result.error || "ブラウザーで開けませんでした");
+            })
+            .catch(showError);
+    });
+
     el.btnFind.addEventListener("click", function () {
         if (el.findbar.hidden) openFind();
         else closeFind();
@@ -1513,6 +1617,7 @@
     });
 
     el.btnLinkCancel.addEventListener("click", closeExternalPrompt);
+    el.btnRemoteLoad.addEventListener("click", allowRemoteContent);
 
     el.btnDeadReload.addEventListener("click", function () {
         location.reload();
