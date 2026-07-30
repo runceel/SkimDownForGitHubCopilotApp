@@ -5,3 +5,6 @@
 .github/extensions/skimdown/web/renderer.html  text eol=lf
 .github/extensions/skimdown/web/skimdown.css   text eol=lf
 .github/extensions/skimdown/web/vendor/**      text eol=lf
+
+# vendor 内のバイナリは改行変換で破損するため、実在する形式を text 扱いから除外する。
+.github/extensions/skimdown/web/vendor/**/*.woff2  -text -eol
