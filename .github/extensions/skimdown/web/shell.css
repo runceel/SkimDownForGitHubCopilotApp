@@ -320,6 +320,11 @@ body[data-sidebar-position="right"] #sidebar {
     border-bottom-color: var(--true-color-red, #cf222e);
 }
 
+.privacy-bar {
+    background: var(--true-color-yellow-muted, #fff8c5);
+    border-bottom-color: var(--true-color-yellow, #d4a72c);
+}
+
 .bar input[type="search"],
 .bar input[type="text"] {
     flex: 1 1 auto;

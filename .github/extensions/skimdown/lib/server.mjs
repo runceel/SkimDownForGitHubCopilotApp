@@ -10,7 +10,7 @@
  */
 
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -36,6 +36,7 @@ import {
 import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag, diagFile } from "./paths.mjs";
 import { createWatcher } from "./watcher.mjs";
 import { isMarkdownFile } from "./scanner.mjs";
+import { fetchRemoteResource, RemoteContentError } from "./remoteContent.mjs";
 
 const WEB_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web");
 
@@ -67,6 +68,7 @@ const CONTENT_TYPES = new Map(Object.entries({
 }));
 
 const SSE_KEEPALIVE_MS = 25000;
+const MAX_REMOTE_GRANTS = 100;
 
 /**
  * Create and start the servers plus all state for one canvas instance.
@@ -88,6 +90,9 @@ export async function createInstance(ctx) {
     const sseClients = new Set();
     /** token -> absolute directory, backing the content origin. */
     const contentDirs = new Map();
+    /** Content hash -> opaque grant token. Grants live only for this canvas instance. */
+    const remoteContentGrants = new Map();
+    const remoteGrantDocuments = new Map();
 
     const watcher = createWatcher(() => {
         void handleFilesystemChange();
@@ -173,6 +178,47 @@ export async function createInstance(ctx) {
         };
     }
 
+    function identifyRemoteContent(doc) {
+        return createHash("sha256")
+            .update(doc.kind)
+            .update("\0")
+            .update(doc.path || doc.id || "")
+            .update("\0")
+            .update(doc.markdown || "")
+            .digest("hex");
+    }
+
+    function setRemoteContentIdentity(doc) {
+        doc.remoteContentId = identifyRemoteContent(doc);
+        return doc;
+    }
+
+    function publicDoc(doc = state.doc) {
+        if (!doc) return null;
+        const token = remoteContentGrants.get(doc.remoteContentId);
+        return token ? { ...doc, remoteContentToken: token } : { ...doc };
+    }
+
+    function grantRemoteContent(documentId) {
+        if (!state.doc || documentId !== state.doc.remoteContentId) {
+            throw new RemoteContentError("表示中の文書が変わりました。もう一度操作してください", 409);
+        }
+
+        let token = remoteContentGrants.get(documentId);
+        if (!token) {
+            token = randomBytes(24).toString("base64url");
+            remoteContentGrants.set(documentId, token);
+            remoteGrantDocuments.set(token, documentId);
+            while (remoteContentGrants.size > MAX_REMOTE_GRANTS) {
+                const oldestDocumentId = remoteContentGrants.keys().next().value;
+                const oldestToken = remoteContentGrants.get(oldestDocumentId);
+                remoteContentGrants.delete(oldestDocumentId);
+                remoteGrantDocuments.delete(oldestToken);
+            }
+        }
+        return token;
+    }
+
     async function selectFile(absPath, { push = true } = {}) {
         const resolved = path.resolve(absPath);
         const file = await readMarkdownFile(resolved);
@@ -186,7 +232,7 @@ export async function createInstance(ctx) {
             subtitle: displayPath(resolved),
             mtimeMs: file.mtimeMs,
         };
-        state.doc = {
+        state.doc = setRemoteContentIdentity({
             kind: "file",
             title: state.selection.title,
             subtitle: state.selection.subtitle,
@@ -196,11 +242,11 @@ export async function createInstance(ctx) {
             // rewrites relative image URLs when it can derive a source dir.
             sourcePath: `d/${token}/${encodeURIComponent(path.basename(resolved))}`,
             contentBaseUri,
-        };
+        });
         updateWatchTargets();
         await rememberSelection(ctx.sessionId, { kind: "file", path: resolved }, state.root);
         if (push) {
-            broadcast("doc", state.doc);
+            broadcast("doc", publicDoc());
             broadcast("state", await buildState());
         }
         return state.doc;
@@ -219,7 +265,7 @@ export async function createInstance(ctx) {
             title: doc.title,
             subtitle: "エージェントが表示した Markdown",
         };
-        state.doc = {
+        state.doc = setRemoteContentIdentity({
             kind: "inline",
             title: doc.title,
             subtitle: state.selection.subtitle,
@@ -227,10 +273,10 @@ export async function createInstance(ctx) {
             markdown: doc.markdown,
             sourcePath: "",
             contentBaseUri: "",
-        };
+        });
         await rememberSelection(ctx.sessionId, { kind: "inline", id: doc.id }, state.root);
         if (push) {
-            broadcast("doc", state.doc);
+            broadcast("doc", publicDoc());
             broadcast("state", await buildState());
         }
         return state.doc;
@@ -283,7 +329,7 @@ export async function createInstance(ctx) {
         await refreshListing();
         await autoSelect({ push: false });
         broadcast("state", await buildState());
-        if (state.doc) broadcast("doc", state.doc);
+        if (state.doc) broadcast("doc", publicDoc());
         else broadcast("empty", {});
     }
 
@@ -297,7 +343,7 @@ export async function createInstance(ctx) {
             await refreshListing();
             await autoSelect({ push: false });
             broadcast("state", await buildState());
-            if (state.doc) broadcast("doc", state.doc);
+            if (state.doc) broadcast("doc", publicDoc());
             else broadcast("empty", {});
             return { opened: "folder", path: classified.path, count: state.listing?.count ?? 0 };
         }
@@ -310,7 +356,7 @@ export async function createInstance(ctx) {
             await refreshListing();
             await selectFile(classified.path, { push: false });
             broadcast("state", await buildState());
-            broadcast("doc", state.doc);
+            broadcast("doc", publicDoc());
             return { opened: "file", path: classified.path };
         }
 
@@ -333,7 +379,7 @@ export async function createInstance(ctx) {
             try {
                 const file = await readMarkdownFile(state.selection.path);
                 if (file.markdown !== state.doc?.markdown) {
-                    state.doc = { ...state.doc, markdown: file.markdown };
+                    state.doc = setRemoteContentIdentity({ ...state.doc, markdown: file.markdown });
                     state.selection.mtimeMs = file.mtimeMs;
                     docChanged = true;
                 }
@@ -348,7 +394,7 @@ export async function createInstance(ctx) {
 
         broadcast("state", await buildState());
         if (docChanged) {
-            if (state.doc) broadcast("doc", state.doc);
+            if (state.doc) broadcast("doc", publicDoc());
             else broadcast("empty", {});
         }
     }
@@ -401,7 +447,7 @@ export async function createInstance(ctx) {
 
         void (async () => {
             broadcastTo(res, "state", await buildState());
-            if (state.doc) broadcastTo(res, "doc", state.doc);
+            if (state.doc) broadcastTo(res, "doc", publicDoc());
             else broadcastTo(res, "empty", {});
         })();
     }
@@ -418,8 +464,14 @@ export async function createInstance(ctx) {
         if (req.method === "GET" && pathname === "/api/state") {
             return sendJson(res, 200, await buildState());
         }
+        if (req.method === "GET" && pathname === "/api/remote-content") {
+            return handleRemoteContent(res, parsed);
+        }
 
         if (req.method !== "POST") return endWithStatus(res, 405, "method not allowed");
+        if (req.headers.origin !== `http://127.0.0.1:${assetPort}`) {
+            return endWithStatus(res, 403, "invalid request origin");
+        }
 
         const body = await readJsonBody(req);
 
@@ -427,10 +479,10 @@ export async function createInstance(ctx) {
             case "/api/select": {
                 if (body.kind === "inline") {
                     const doc = await selectInline(String(body.id || ""));
-                    return sendJson(res, 200, { ok: true, doc });
+                    return sendJson(res, 200, { ok: true, doc: publicDoc(doc) });
                 }
                 const doc = await selectFile(String(body.path || ""));
-                return sendJson(res, 200, { ok: true, doc });
+                return sendJson(res, 200, { ok: true, doc: publicDoc(doc) });
             }
             case "/api/source": {
                 const source = [SOURCE_SESSION, SOURCE_WORKSPACE, SOURCE_PATH].includes(body.source)
@@ -451,6 +503,16 @@ export async function createInstance(ctx) {
                 const settings = await updateSettings(body || {});
                 broadcast("settings", settings);
                 return sendJson(res, 200, { ok: true, settings });
+            }
+            case "/api/remote-content/allow": {
+                try {
+                    grantRemoteContent(String(body.documentId || ""));
+                } catch (error) {
+                    const status = error instanceof RemoteContentError ? error.status : 400;
+                    return sendJson(res, status, { error: error?.message || "許可できませんでした" });
+                }
+                const doc = publicDoc();
+                return sendJson(res, 200, { ok: true, doc });
             }
             case "/api/expanded": {
                 await setExpanded(String(body.root || ""), body.expanded);
@@ -485,6 +547,30 @@ export async function createInstance(ctx) {
             }
             default:
                 return endWithStatus(res, 404, "unknown endpoint");
+        }
+    }
+
+    async function handleRemoteContent(res, parsed) {
+        const token = parsed.searchParams.get("token") || "";
+        const grantedDocumentId = remoteGrantDocuments.get(token);
+        if (!grantedDocumentId || grantedDocumentId !== state.doc?.remoteContentId) {
+            return endWithStatus(res, 403, "remote content permission required");
+        }
+
+        try {
+            const resource = await fetchRemoteResource(parsed.searchParams.get("url") || "");
+            res.writeHead(200, {
+                "Content-Type": resource.contentType,
+                "Content-Length": resource.body.length,
+                "Cache-Control": "private, max-age=300",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            });
+            res.end(resource.body);
+        } catch (error) {
+            const status = error instanceof RemoteContentError ? error.status : 502;
+            endWithStatus(res, status, error?.message || "remote content error");
         }
     }
 
@@ -538,6 +624,9 @@ export async function createInstance(ctx) {
         res.writeHead(200, {
             "Content-Type": type,
             "Cache-Control": "no-store",
+            "Content-Security-Policy": buildAssetCsp(contentBaseUri),
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
         });
         res.end(data);
     }
@@ -742,6 +831,23 @@ function portOf(server) {
 
 function closeServer(server) {
     return new Promise((resolve) => server.close(() => resolve()));
+}
+
+export function buildAssetCsp(contentBaseUri) {
+    const contentOrigin = new URL(contentBaseUri).origin;
+    return [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        `img-src 'self' ${contentOrigin} data: blob:`,
+        `media-src 'self' ${contentOrigin} blob:`,
+        "font-src 'self'",
+        "connect-src 'self'",
+        "frame-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "form-action 'none'",
+    ].join("; ");
 }
 
 export { isMarkdownFile };

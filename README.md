@@ -66,6 +66,23 @@ Mermaid 図はクリックで拡大モーダルが開き、ホイールでズー
 
 外部リンクはいきなり開かず、URL を表示した確認バーが出ます。承認したものだけ OS の既定ブラウザに渡されます。
 
+## リモートコンテンツとプライバシー
+
+Markdown 内の HTTP(S) 画像・メディアは**既定で読み込みません**。文書にリモート参照があると確認バーが表示され、
+「この文書で読み込む」を選んだ場合だけ読み込みます。許可は表示中の文書の現在の内容にだけ適用され、
+文書の内容が変わると再確認が必要です。全体を常時許可する設定はありません。
+
+許可後もブラウザーから参照先へ直接接続せず、SkimDown の loopback サーバーを経由します。リクエストは
+`Referrer-Policy: no-referrer` で処理し、リダイレクト先を含めて DNS 解決結果を検査します。次の宛先は
+許可後も読み込みません。
+
+- loopback、link-local、プライベート / unique-local IP
+- 単一ラベルの intranet ホスト名と `.local` / `.internal` / `.home` / `.lan`
+- 画像・音声・動画以外の応答、20 MB を超える応答
+
+renderer の CSP は外部 origin を許可せず、`img-src` / `media-src` は SkimDown の asset/content origin と
+`data:` / `blob:`（必要な種別のみ）、`connect-src` は asset origin 自身に限定しています。
+
 ## 仕組み
 
 ```mermaid
@@ -82,18 +99,18 @@ flowchart TB
     renderer -- "ready / link / shortcut / 検索結果" --> shell
     shell -- "fetch /api/*" --> ext
     ext -- "SSE /events" --> shell
+    renderer -- "許可済みリモートメディアを同一 origin URL で要求" --> ext
 ```
 
-移植の要点は、レンダラーを **一切書き換えない** ことです。
-`renderer.js` がホストに触るのは `window.chrome.webview` の 2 箇所だけだったので、
-`bridge.js` でそれを `postMessage` の上に再実装しました。
-その結果 `renderer.js` / `skimdown.css` / `vendor/**` は SkimDown for Windows からバイト単位でコピーでき、
-`renderer.html` の差分も `<script src="bridge.js">` の 1 行だけです。
-SkimDown 側が改善されたら、それらのファイルを上書きコピーするだけで追従できます。
+移植の要点は、上流 renderer の WebView2 プロトコルを維持することです。
+`bridge.js` が `window.chrome.webview` を `postMessage` の上に再実装し、renderer 側の差分は
+リモートコンテンツの URL 無効化 / 許可済み proxy 化に限定しています。`skimdown.css` / `vendor/**` は
+SkimDown for Windows からバイト単位でコピーできます。
 
 ローカルの HTTP サーバーは 2 本立てます。SkimDown が WebView2 で採っている
 「アセット origin と コンテンツ origin を分ける」設計をそのまま踏襲したもので、
 本文中の相対画像はコンテンツ側 origin からのみ、しかも開いているディレクトリ配下からのみ配信されます。
+許可済みのリモート画像・メディアは asset origin の proxy が公開 IP に限定して取得します。
 
 テーマはアプリのトークン（`--background-color-default` など）を読み取り、
 SkimDown のカスタムテーマ機構（`--skim-*`）に写して渡します。
