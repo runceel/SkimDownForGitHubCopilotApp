@@ -1,0 +1,63 @@
+name: Release extension
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify and release extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install test dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Verify release assets
+        run: |
+          node scripts/verify-release-assets.mjs
+          node .github/extensions/skimdown/scripts/vendor-assets.mjs verify --source
+      - name: Package extension
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="skimdown-${GITHUB_REF_NAME}.zip"
+          mkdir -p dist/skimdown
+          cp -a .github/extensions/skimdown/. dist/skimdown/
+          (
+            cd dist
+            zip -q -r "$asset" skimdown
+            sha256sum "$asset" > "$asset.sha256"
+          )
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: ${{ steps.package.outputs.asset }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/$ASSET" \
+            "dist/$ASSET.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "SkimDown $GITHUB_REF_NAME"
