@@ -5,8 +5,8 @@
  *
  *   extension  <-- fetch / SSE -->  shell  <-- postMessage -->  renderer iframe
  *
- * The renderer is SkimDown for Windows' renderer.js, copied unmodified; it
- * still speaks the WebView2 protocol, which bridge.js maps onto postMessage.
+ * The renderer follows SkimDown for Windows' WebView2 protocol, which bridge.js
+ * maps onto postMessage. This port additionally enforces remote-content consent.
  * Theme tokens are only injected into this document, so we translate them into
  * SkimDown's --skim-* variables and hand them over as `themeVars`.
  */
@@ -55,6 +55,9 @@
         btnPathOpen: document.getElementById("btn-path-open"),
         btnPathCancel: document.getElementById("btn-path-cancel"),
         linkbar: document.getElementById("linkbar"),
+        remotebar: document.getElementById("remotebar"),
+        remoteText: document.getElementById("remote-text"),
+        btnRemoteLoad: document.getElementById("btn-remote-load"),
         deadbar: document.getElementById("deadbar"),
         deadbarText: document.getElementById("deadbar-text"),
         btnDeadReload: document.getElementById("btn-dead-reload"),
@@ -75,6 +78,7 @@
         expandedRoot: null,
         search: { query: "", caseSensitive: false },
         pendingExternalHref: null,
+        remoteContentFailures: 0,
         rendererOrigin: null,
         rendererReady: false,
         rendererQueue: [],
@@ -186,6 +190,17 @@
                 return RENDERER_SHORTCUTS.has(msg.id);
             case "zoomChanged":
                 return Number.isFinite(msg.factor);
+            case "remoteContent":
+                return /^[a-f0-9]{64}$/.test(msg.documentId || "")
+                    && Number.isInteger(msg.blocked) && msg.blocked >= 0 && msg.blocked <= 10000
+                    && Number.isInteger(msg.proxied) && msg.proxied >= 0 && msg.proxied <= 10000
+                    && Number.isInteger(msg.policyBlocked) && msg.policyBlocked >= 0 && msg.policyBlocked <= 10000
+                    && Array.isArray(msg.hosts) && msg.hosts.length <= 8
+                    && msg.hosts.every(function (host) {
+                        return typeof host === "string" && host.length <= 255;
+                    });
+            case "remoteContent/error":
+                return /^[a-f0-9]{64}$/.test(msg.documentId || "");
             default:
                 return false;
         }
@@ -347,6 +362,12 @@
             case "zoomChanged":
                 applyZoom(msg.factor, { fromRenderer: true });
                 break;
+            case "remoteContent":
+                handleRemoteContentMessage(msg);
+                break;
+            case "remoteContent/error":
+                handleRemoteContentError(msg);
+                break;
             default:
                 break;
         }
@@ -360,6 +381,8 @@
             markdown: doc.markdown || "",
             sourcePath: doc.sourcePath || "",
             contentBaseUri: doc.contentBaseUri || "",
+            remoteContentId: doc.remoteContentId || "",
+            remoteContentToken: doc.remoteContentToken || "",
             theme: theme.theme,
             themeType: theme.themeType,
             themeIsDark: theme.themeIsDark,
@@ -641,12 +664,14 @@
         events.addEventListener("doc", function (ev) {
             var doc = JSON.parse(ev.data);
             state.doc = doc;
+            resetRemoteContentUi();
             renderDocHeader(doc);
             el.emptyState.hidden = true;
             pushDocToRenderer(doc);
         });
         events.addEventListener("empty", function () {
             state.doc = null;
+            resetRemoteContentUi();
             renderDocHeader(null);
             el.emptyState.hidden = false;
             postToRenderer({ type: "empty" });
@@ -1048,6 +1073,84 @@
         el.linkbar.hidden = true;
     }
 
+    // ---------- remote content ----------
+
+    function resetRemoteContentUi() {
+        state.remoteContentFailures = 0;
+        el.remotebar.hidden = true;
+        el.remoteText.textContent = "";
+        el.remoteText.title = "";
+        el.btnRemoteLoad.hidden = false;
+        el.btnRemoteLoad.disabled = false;
+    }
+
+    function handleRemoteContentMessage(msg) {
+        if (!state.doc || msg.documentId !== state.doc.remoteContentId) return;
+
+        var blocked = Number(msg.blocked) || 0;
+        var proxied = Number(msg.proxied) || 0;
+        var policyBlocked = Number(msg.policyBlocked) || 0;
+        if (blocked > 0) {
+            var hosts = Array.isArray(msg.hosts) && msg.hosts.length > 0
+                ? " (" + msg.hosts.join(", ") + ")"
+                : "";
+            el.remoteText.textContent =
+                "リモートコンテンツ " + blocked + " 件をブロックしました" + hosts +
+                "。読み込むと公開ネットワーク上の画像・メディアへ接続します。";
+            el.remoteText.title =
+                "許可はこの文書の現在の内容だけに適用されます。内容が変わると再度確認します。";
+            el.btnRemoteLoad.hidden = false;
+            el.remotebar.hidden = false;
+            return;
+        }
+
+        if (policyBlocked > 0) {
+            el.remoteText.textContent =
+                "リモートコンテンツ " + policyBlocked +
+                " 件は、loopback、link-local、プライベートネットワーク宛てのため読み込みませんでした。";
+            el.remoteText.title = "";
+            el.btnRemoteLoad.hidden = true;
+            el.remotebar.hidden = false;
+            return;
+        }
+
+        if (proxied > 0 && state.remoteContentFailures > 0) {
+            showRemoteContentFailure();
+            return;
+        }
+        el.remotebar.hidden = true;
+    }
+
+    function handleRemoteContentError(msg) {
+        if (!state.doc || msg.documentId !== state.doc.remoteContentId) return;
+        state.remoteContentFailures += 1;
+        showRemoteContentFailure();
+    }
+
+    function showRemoteContentFailure() {
+        el.remoteText.textContent =
+            "一部のリモートコンテンツを読み込めませんでした。プライベート IP、未対応形式、または通信エラーの可能性があります。";
+        el.remoteText.title = "";
+        el.btnRemoteLoad.hidden = true;
+        el.remotebar.hidden = false;
+    }
+
+    function allowRemoteContent() {
+        if (!state.doc || !state.doc.remoteContentId) return;
+        el.btnRemoteLoad.disabled = true;
+        api("/api/remote-content/allow", { documentId: state.doc.remoteContentId })
+            .then(function (result) {
+                if (!result.doc) return;
+                state.doc = result.doc;
+                resetRemoteContentUi();
+                pushDocToRenderer(result.doc);
+            })
+            .catch(function (error) {
+                el.btnRemoteLoad.disabled = false;
+                showError(error);
+            });
+    }
+
     // ---------- clipboard ----------
 
     function copyText(text) {
@@ -1416,6 +1519,7 @@
     });
 
     el.btnLinkCancel.addEventListener("click", closeExternalPrompt);
+    el.btnRemoteLoad.addEventListener("click", allowRemoteContent);
 
     el.btnDeadReload.addEventListener("click", function () {
         location.reload();

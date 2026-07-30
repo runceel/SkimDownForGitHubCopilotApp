@@ -65,7 +65,10 @@ async function createRenderer({ loadPurify = true } = {}) {
     return {
         window,
         rawDivAssignments,
-        async render(markdown) {
+        async render(markdown, {
+            remoteContentId = "a".repeat(64),
+            remoteContentToken = "",
+        } = {}) {
             for (const listener of listeners) {
                 listener({
                     data: {
@@ -73,6 +76,8 @@ async function createRenderer({ loadPurify = true } = {}) {
                         markdown,
                         sourcePath: "docs/test.md",
                         contentBaseUri: "https://skimdown-content.example/",
+                        remoteContentId,
+                        remoteContentToken,
                         theme: "light",
                     },
                 });
@@ -139,4 +144,33 @@ test("renderer fails closed when DOMPurify is unavailable", async (t) => {
     assert.match(content.textContent, /sanitizer failed to load/i);
     assert.equal(renderer.window.__securityEvents, 0);
     assert.deepEqual(renderer.rawDivAssignments, []);
+});
+
+test("remote resources require document consent and use the renderer proxy", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+
+    let content = await renderer.render(
+        '<img src="https://images.example/pixel.png">' +
+            '<video poster="https://media.example/poster.jpg"></video>' +
+            '<input type="image" src="https://forms.example/submit.png">',
+    );
+    let image = content.querySelector("img");
+    let video = content.querySelector("video");
+    const imageInput = content.querySelector('input[type="image"]');
+    assert.equal(image.hasAttribute("src"), false);
+    assert.equal(image.getAttribute("data-remote-blocked"), "true");
+    assert.equal(video.hasAttribute("poster"), false);
+    assert.equal(imageInput.hasAttribute("src"), false);
+
+    content = await renderer.render(
+        '<img src="https://images.example/pixel.png"><audio src="http://127.0.0.1/private.mp3"></audio>',
+        { remoteContentToken: "document-grant" },
+    );
+    image = content.querySelector("img");
+    const audio = content.querySelector("audio");
+    assert.match(image.getAttribute("src"), /^\/remote-content\?token=document-grant&url=/);
+    assert.equal(image.getAttribute("referrerpolicy"), "no-referrer");
+    assert.equal(audio.hasAttribute("src"), false);
+    assert.equal(audio.getAttribute("data-remote-policy-blocked"), "true");
 });

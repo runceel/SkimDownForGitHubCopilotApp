@@ -63,6 +63,7 @@ test("serves shell, renderer, and content with isolated capabilities", async () 
         assert.doesNotMatch(rendererCsp, /script-src[^;]*unsafe-inline|unsafe-eval/);
         assert.match(rendererCsp, /connect-src 'none'/);
         assert.match(rendererCsp, new RegExp(`img-src[^;]*${escapeRegex(contentOrigin)}`));
+        assert.match(rendererCsp, new RegExp(`media-src[^;]*${escapeRegex(contentOrigin)}`));
         assert.match(rendererCsp, new RegExp(`frame-ancestors ${escapeRegex(shellOrigin)}`));
         assert.equal(rendererResponse.headers.get("x-content-type-options"), "nosniff");
         assert.equal(rendererResponse.headers.get("cross-origin-resource-policy"), "same-site");

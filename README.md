@@ -68,6 +68,23 @@ Mermaid 図はクリックで拡大モーダルが開き、ホイールでズー
 
 外部リンクはいきなり開かず、URL を表示した確認バーが出ます。承認したものだけ OS の既定ブラウザに渡されます。
 
+## リモートコンテンツとプライバシー
+
+Markdown 内の HTTP(S) 画像・メディアは**既定で読み込みません**。文書にリモート参照があると確認バーが表示され、
+「この文書で読み込む」を選んだ場合だけ読み込みます。許可は表示中の文書の現在の内容にだけ適用され、
+文書の内容が変わると再確認が必要です。全体を常時許可する設定はありません。
+
+許可後もブラウザーから参照先へ直接接続せず、SkimDown の loopback サーバーを経由します。リクエストは
+`Referrer-Policy: no-referrer` で処理し、リダイレクト先を含めて DNS 解決結果を検査します。次の宛先は
+許可後も読み込みません。
+
+- loopback、link-local、プライベート / unique-local IP
+- 単一ラベルの intranet ホスト名と `.local` / `.internal` / `.home` / `.lan`
+- 画像・音声・動画以外の応答、20 MB を超える応答
+
+renderer の CSP は外部 origin を許可せず、`img-src` / `media-src` は renderer/content origin と
+`data:` / `blob:`（必要な種別のみ）に限定し、`connect-src` は `'none'` にしています。
+
 ## 仕組み
 
 ```mermaid
@@ -75,7 +92,7 @@ flowchart TB
     subgraph host["Copilot app の canvas パネル"]
         shell["shell.html / shell.js<br/>サイドバー・ツールバー・検索・テーマ橋渡し"]
         subgraph inner["入れ子 iframe"]
-            renderer["renderer.html / renderer.js<br/>SkimDown からそのままコピー"]
+            renderer["renderer.html / renderer.js<br/>SkimDown 同期 + 最小限のセキュリティ修正"]
         end
     end
     ext["extension.mjs + lib/**<br/>Node 側"]
@@ -84,6 +101,7 @@ flowchart TB
     renderer -- "ready / link / shortcut / 検索結果" --> shell
     shell -- "fetch /api/*" --> ext
     ext -- "SSE /events" --> shell
+    renderer -- "許可済みリモートメディアを同一 origin URL で要求" --> ext
 ```
 
 移植の要点は、レンダラーを原則として上流から同期することです。
@@ -94,9 +112,10 @@ flowchart TB
 同期モデルを使いますが、安全な上流リビジョンが未提供の脆弱性については、回帰テスト付きの
 最小限のローカル修正を許可し、上流へ反映された時点で再同期します。
 
-ローカルの HTTP サーバーは 2 本立てます。SkimDown が WebView2 で採っている
-「アセット origin と コンテンツ origin を分ける」設計をそのまま踏襲したもので、
-本文中の相対画像はコンテンツ側 origin からのみ、しかも開いているディレクトリ配下からのみ配信されます。
+ローカル HTTP サーバーは、信頼済み shell、信頼されない renderer、ローカル画像用 content の
+3 つの loopback origin に分離します。本文中の相対画像は content origin からのみ、しかも開いている
+ディレクトリ配下からのみ配信されます。リモート画像・メディアは既定で無効化し、文書単位で許可した場合だけ、
+renderer origin の proxy が公開 IP に限定して取得します。
 状態 API と SSE は canvas インスタンスごとの一時的な capability で認証し、同一 origin の
 ブラウザー要求だけを受け付けます。ファイル選択も workspace、セッション文書、または明示的に
 開いたルートの内側に限定されます。

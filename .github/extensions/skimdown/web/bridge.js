@@ -1,7 +1,7 @@
 /* SkimDown canvas bridge.
  *
- * `renderer.js` is copied byte-for-byte from SkimDown for Windows, where it
- * talks to the WinUI host through WebView2's `window.chrome.webview`. Inside a
+ * `renderer.js` is based on SkimDown for Windows, where it talks to the WinUI
+ * host through WebView2's `window.chrome.webview`. Inside a
  * GitHub Copilot app canvas that host is gone, so this shim provides the same
  * two-method surface backed by the parent shell document instead.
  *
