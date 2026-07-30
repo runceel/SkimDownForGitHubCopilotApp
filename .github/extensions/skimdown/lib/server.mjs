@@ -611,6 +611,10 @@ export async function createInstance(ctx) {
                 );
                 return sendJson(res, 200, { ok: true });
             }
+            case "/api/open-browser": {
+                const opened = openExternal(url);
+                return sendJson(res, opened.ok ? 200 : 500, opened);
+            }
             case "/api/open-external": {
                 const opened = openExternal(String(body.href || ""));
                 return sendJson(res, opened.ok ? 200 : 400, opened);
