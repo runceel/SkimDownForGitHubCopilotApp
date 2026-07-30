@@ -1,5 +1,8 @@
 # Third-party notices
 
+SkimDown for GitHub Copilot App itself is distributed under the
+[MIT License](LICENSE). This document covers the separately licensed assets bundled with it.
+
 SkimDown for GitHub Copilot App bundles the JavaScript and CSS assets listed below so the
 canvas renders Markdown completely offline. They are shipped unmodified, exactly as they
 appear in [SkimDown for Windows](https://github.com/runceel/SkimDownForWindows), under

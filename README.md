@@ -10,18 +10,36 @@
 
 ![このセッションで生成された Markdown を表示している SkimDown canvas](docs/screenshot-dark.png)
 
-## 使い方
+## インストール
 
 拡張はこのリポジトリの `.github/extensions/skimdown/` に入っているので、
 このリポジトリをプロジェクトとして開けば自動で読み込まれます。あとはエージェントに頼むだけです。
 
+他のリポジトリでも常に使えるようにするには、GitHub Copilot app で次のように依頼し、
+公開リポジトリのフォルダー URL からユーザースコープへインストールします。
+
+> 次の GitHub リポジトリフォルダーから SkimDown をユーザースコープへインストールしてください。
+>
+> `https://github.com/runceel/SkimDownForGitHubCopilotApp/tree/main/.github/extensions/skimdown`
+
+`main` の URL は常に最新版を指します。再現可能なインストールには、リリース後に `main` を
+バージョンタグへ置き換えた URL を使ってください。
+
+```text
+https://github.com/runceel/SkimDownForGitHubCopilotApp/tree/v1.0.0/.github/extensions/skimdown
+```
+
+リリースページには手動インストール用の ZIP と SHA-256 チェックサムも添付されます。
+ZIP を展開すると、ユーザーの拡張ディレクトリへ配置できる `skimdown/` フォルダーになります。
+
+拡張はローカルでコードを実行します。信頼できるタグまたはコミットを指定し、インストール前に
+変更内容を確認してください。公開済みタグは移動せず、更新には新しいバージョンを使います。
+
+## 使い方
+
 - 「SkimDown で `docs/architecture.md` を開いて」
 - 「このセッションで作った Markdown を SkimDown で見せて」
 - 「今の設計案を SkimDown で表示して」（ファイルを作らずにその場で描画）
-
-他のリポジトリでも使いたい場合は、`install_extension` にこのリポジトリの
-`.github/extensions/skimdown` フォルダー URL を渡してユーザースコープに入れてください。
-vendor アセットが 4MB を超えるため、gist 経由の共有はできません。
 
 ## Canvas アクション
 
@@ -157,6 +175,8 @@ vendor アセットを更新する場合は、取得元のタグとコミット�
 SkimDown の履歴消去はこれらの原本を削除しません。
 
 ## ライセンス
+
+SkimDown for GitHub Copilot App は [MIT License](LICENSE) で公開しています。
 
 同梱している OSS のライセンスは
 [THIRD-PARTY-NOTICES.md](.github/extensions/skimdown/THIRD-PARTY-NOTICES.md) を参照してください。

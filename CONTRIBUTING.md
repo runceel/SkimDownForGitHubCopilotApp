@@ -67,3 +67,28 @@ node .github/extensions/skimdown/scripts/vendor-assets.mjs restore
 
 `vendor-lock.json` is the byte-level inventory. `vendor-sbom.cdx.json` is the generated
 CycloneDX dependency inventory. Both files are reviewed and committed with an update.
+
+## Publishing a release
+
+Releases use semantic version tags such as `v1.0.0`. A release tag must point to a reviewed
+commit on `main` for which all required checks have passed.
+
+1. Confirm the intended commit is present on `main` and the vendored asset verification passed.
+2. Create and push a new annotated tag. Never move or reuse a published tag.
+
+   ```console
+   git tag -a v1.0.0 -m "SkimDown v1.0.0"
+   git push origin v1.0.0
+   ```
+
+3. The `Release extension` workflow runs the tests and integrity checks, packages the complete
+   `.github/extensions/skimdown` directory as `skimdown-<version>.zip`, writes its SHA-256
+   checksum, and creates the GitHub Release.
+4. Verify the release assets, then use the immutable tag in the public installation URL:
+
+   ```text
+   https://github.com/runceel/SkimDownForGitHubCopilotApp/tree/v1.0.0/.github/extensions/skimdown
+   ```
+
+If a published release needs a correction, create a new patch version instead of replacing its
+tag or assets.
