@@ -49,3 +49,4 @@ ADR は、SkimDown canvas 拡張の**全体アーキテクチャに関する判�
 | [0004](0004-persist-bounded-renderer-diagnostics.md) | Accepted | renderer 診断を上限付き成果物として永続化する |
 | [0005](0005-scope-persistent-state-by-user-session-and-document.md) | Accepted | 永続状態をユーザー、セッション、文書の同一性で分ける |
 | [0006](0006-allow-bounded-local-renderer-security-hardening.md) | Accepted | 互換レイヤー背後の上流同期を維持しつつ、緊急の renderer hardening を限定的に許可する |
+| [0007](0007-protect-loopback-apis-with-instance-capabilities.md) | Accepted | loopback API をインスタンス capability とブラウザー要求境界で保護する |

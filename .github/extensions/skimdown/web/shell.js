@@ -18,6 +18,7 @@
     var ZOOM_MAX = 3.0;
     var ZOOM_STEP = 1.1;
     var CONTENT_WIDTHS = ["760px", "960px", "1200px", "none"];
+    var CAPABILITY_TOKEN = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
 
     var el = {
         body: document.body,
@@ -606,9 +607,11 @@
     // ---------- server transport ----------
 
     function api(path, body) {
+        var headers = { "X-SkimDown-Capability": CAPABILITY_TOKEN };
+        if (body !== undefined) headers["Content-Type"] = "application/json";
         return fetch(path, {
             method: body === undefined ? "GET" : "POST",
-            headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+            headers: headers,
             body: body === undefined ? undefined : JSON.stringify(body),
         }).then(function (res) {
             return res.json().catch(function () {
@@ -621,7 +624,7 @@
     }
 
     function connectEvents() {
-        var events = new EventSource("/events");
+        var events = new EventSource("/events?token=" + encodeURIComponent(CAPABILITY_TOKEN));
         var failures = 0;
 
         events.addEventListener("open", function () {

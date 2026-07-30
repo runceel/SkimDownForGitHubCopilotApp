@@ -40,6 +40,14 @@
     var lastReady = null;
     var errors = [];
 
+    function capabilityToken() {
+        try {
+            return new URLSearchParams(window.parent.location.hash.slice(1)).get("token") || "";
+        } catch (e) {
+            return "";
+        }
+    }
+
     // ---------- diagnostics ----------
 
     function recordError(text) {
@@ -92,7 +100,10 @@
         try {
             fetch("/api/diag", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-SkimDown-Capability": capabilityToken(),
+                },
                 body: JSON.stringify(snapshot(reason)),
             }).catch(function () {
                 // Diagnostics must never break the renderer.
