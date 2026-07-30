@@ -72,6 +72,15 @@ function validateManifest(manifest) {
     if (!sha256Pattern.test(file.sha256 ?? "")) {
       errors.push(`invalid SHA-256 for ${file.path}`);
     }
+    if (file.source) {
+      try {
+        if (new URL(file.source).protocol !== "https:") {
+          errors.push(`source must use HTTPS for ${file.path}`);
+        }
+      } catch {
+        errors.push(`invalid source URL for ${file.path}`);
+      }
+    }
   }
   if (seenPaths.size === 0) {
     errors.push("files must not be empty");
@@ -162,6 +171,9 @@ async function verifyLocal(manifest) {
 }
 
 function sourceUrl(manifest, file) {
+  if (file.source) {
+    return file.source;
+  }
   const base = manifest.upstream.downloadBase.replace(
     "{revision}",
     manifest.upstream.revision,

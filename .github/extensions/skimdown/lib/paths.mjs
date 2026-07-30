@@ -10,6 +10,13 @@ import { homedir } from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 
+import {
+    DIAG_ENTRY_MAX_BYTES,
+    DIAG_SCHEMA_VERSION,
+    DIAG_SEGMENT_MAX_BYTES,
+    diagnosticByteLength,
+} from "./diagnostics.mjs";
+
 export const EXTENSION_NAME = "skimdown";
 
 export function copilotHome() {
@@ -37,25 +44,150 @@ export function diagFile() {
     return path.join(artifactsDir(), "diag.jsonl");
 }
 
-/* Written on every canvas boot, so without a cap the file grows forever. Keep
- * the tail: an entry is only interesting until the problem it describes has
- * been dealt with. */
-const DIAG_MAX_LINES = 200;
+export function diagArchiveFile() {
+    return path.join(artifactsDir(), "diag.1.jsonl");
+}
+
+function diagLockFile() {
+    return path.join(artifactsDir(), ".diag.lock");
+}
+
+let diagWriteQueue = Promise.resolve();
+const preparedDiagDirs = new Set();
+const DIAG_LOCK_RETRY_MS = 10;
+const DIAG_LOCK_ATTEMPTS = 200;
+const DIAG_LOCK_STALE_MS = 30 * 1000;
 
 export async function appendDiag(entry) {
+    const line = JSON.stringify(entry) + "\n";
+    if (
+        entry?.schemaVersion !== DIAG_SCHEMA_VERSION ||
+        diagnosticByteLength(entry) > DIAG_ENTRY_MAX_BYTES
+    ) {
+        return false;
+    }
+
+    const write = diagWriteQueue.then(() => appendDiagLine(line));
+    diagWriteQueue = write.catch(() => {});
     try {
-        await ensureDir(artifactsDir());
-        await fs.appendFile(diagFile(), JSON.stringify(entry) + "\n", "utf8");
-        await trimDiag();
+        await write;
+        return true;
     } catch {
         // Diagnostics must never take the canvas down.
+        return false;
     }
 }
 
-async function trimDiag() {
-    const lines = (await fs.readFile(diagFile(), "utf8")).split("\n").filter(Boolean);
-    if (lines.length <= DIAG_MAX_LINES) return;
-    await fs.writeFile(diagFile(), lines.slice(-DIAG_MAX_LINES).join("\n") + "\n", "utf8");
+async function appendDiagLine(line) {
+    const dir = artifactsDir();
+    await ensureDir(dir);
+    const releaseLock = await acquireDiagLock();
+    try {
+        if (!preparedDiagDirs.has(dir)) {
+            await removeLegacyDiagnostics();
+            preparedDiagDirs.add(dir);
+        }
+        await clampDiagFile(diagFile());
+        await clampDiagFile(diagArchiveFile());
+
+        const currentSize = await fileSize(diagFile());
+        if (currentSize + Buffer.byteLength(line, "utf8") > DIAG_SEGMENT_MAX_BYTES) {
+            await fs.rm(diagArchiveFile(), { force: true });
+            if (currentSize > 0) await fs.rename(diagFile(), diagArchiveFile());
+        }
+        await fs.appendFile(diagFile(), line, "utf8");
+    } finally {
+        await releaseLock();
+    }
+}
+
+async function acquireDiagLock() {
+    const lockFile = diagLockFile();
+    for (let attempt = 0; attempt < DIAG_LOCK_ATTEMPTS; attempt += 1) {
+        try {
+            const handle = await fs.open(lockFile, "wx");
+            await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: Date.now() }));
+            return async () => {
+                await handle.close();
+                await fs.rm(lockFile, { force: true });
+            };
+        } catch (error) {
+            if (error?.code !== "EEXIST") throw error;
+            await removeStaleDiagLock(lockFile);
+            await delay(DIAG_LOCK_RETRY_MS);
+        }
+    }
+    throw new Error("timed out acquiring diagnostic storage lock");
+}
+
+async function removeStaleDiagLock(lockFile) {
+    let first;
+    try {
+        first = await fs.stat(lockFile);
+    } catch (error) {
+        if (error?.code === "ENOENT") return;
+        throw error;
+    }
+    if (Date.now() - first.mtimeMs < DIAG_LOCK_STALE_MS) return;
+
+    let second;
+    try {
+        second = await fs.stat(lockFile);
+    } catch (error) {
+        if (error?.code === "ENOENT") return;
+        throw error;
+    }
+    if (second.mtimeMs !== first.mtimeMs || second.size !== first.size) return;
+    await fs.rm(lockFile, { force: true });
+}
+
+function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function removeLegacyDiagnostics() {
+    for (const file of [diagFile(), diagArchiveFile()]) {
+        let text;
+        try {
+            text = await fs.readFile(file, "utf8");
+        } catch (error) {
+            if (error?.code === "ENOENT") continue;
+            throw error;
+        }
+
+        const currentOnly = text.split("\n").filter(Boolean).every((line) => {
+            try {
+                return JSON.parse(line)?.schemaVersion === DIAG_SCHEMA_VERSION;
+            } catch {
+                return false;
+            }
+        });
+        if (!currentOnly) await fs.rm(file, { force: true });
+    }
+}
+
+async function clampDiagFile(file) {
+    const size = await fileSize(file);
+    if (size <= DIAG_SEGMENT_MAX_BYTES) return;
+
+    const handle = await fs.open(file, "r");
+    try {
+        const tail = Buffer.alloc(DIAG_SEGMENT_MAX_BYTES);
+        await handle.read(tail, 0, tail.length, size - tail.length);
+        const firstNewline = tail.indexOf(0x0a);
+        await fs.writeFile(file, firstNewline >= 0 ? tail.subarray(firstNewline + 1) : Buffer.alloc(0));
+    } finally {
+        await handle.close();
+    }
+}
+
+async function fileSize(file) {
+    try {
+        return (await fs.stat(file)).size;
+    } catch (error) {
+        if (error?.code === "ENOENT") return 0;
+        throw error;
+    }
 }
 
 export function sessionStateFile(sessionId) {

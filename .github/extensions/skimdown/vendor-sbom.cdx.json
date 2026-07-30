@@ -22,10 +22,10 @@
   "components": [
     {
       "type": "library",
-      "bom-ref": "pkg:npm/dompurify@3.1.6",
+      "bom-ref": "pkg:npm/dompurify@3.4.12",
       "name": "dompurify",
-      "version": "3.1.6",
-      "purl": "pkg:npm/dompurify@3.1.6",
+      "version": "3.4.12",
+      "purl": "pkg:npm/dompurify@3.4.12",
       "licenses": [
         {
           "expression": "Apache-2.0 OR MPL-2.0"
@@ -38,7 +38,7 @@
         },
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/dompurify/-/dompurify-3.1.6.tgz"
+          "url": "https://github.com/cure53/DOMPurify/releases/download/3.4.12/purify.min.js"
         }
       ],
       "properties": [
@@ -249,7 +249,7 @@
     {
       "ref": "pkg:github/runceel/SkimDownForGitHubCopilotApp",
       "dependsOn": [
-        "pkg:npm/dompurify@3.1.6",
+        "pkg:npm/dompurify@3.4.12",
         "pkg:npm/highlight.js@11.10.0",
         "pkg:npm/katex@0.16.22",
         "pkg:npm/markdown-it-emoji@3.0.0",

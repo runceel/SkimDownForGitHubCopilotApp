@@ -9,19 +9,16 @@
  * already exists here and belongs to someone else — see the installer at the
  * bottom of this file, which is why taking that name is not a plain assignment.
  *
- * Transport: `renderer.html` is loaded from a *relative* URL, so this frame is
- * always same-origin with the shell. That means the two documents can call
- * each other's functions directly, which is strictly more reliable than
- * `postMessage`: nothing depends on a listener already being attached, on
- * `targetOrigin` matching, or on the message surviving a frame swap. A lost
- * handshake here leaves the preview permanently blank, so `postMessage` is
- * kept only as a fallback for the case where the direct handle is missing.
+ * Transport: renderer assets live on a dedicated loopback origin and the frame
+ * is sandboxed by the parent shell. Communication is therefore limited to a
+ * source- and origin-checked `postMessage` envelope. The shell repeats an
+ * idempotent hello probe, so readiness does not depend on a one-shot message.
  *
  * Calls are still dispatched asynchronously (`setTimeout(..., 0)`) so that
  * `renderer.js` observes exactly the ordering and re-entrancy it would get
  * from a real `postMessage`.
  *
- * Envelope (fallback path only): { __skim: true, payload: <renderer message> }
+ * Envelope: { __skim: true, payload: <renderer message> }
  *
  * This file must execute before `renderer.js`, which is why it is a plain
  * (non-deferred) script placed ahead of the deferred renderer in
@@ -33,18 +30,31 @@
     "use strict";
 
     var listeners = [];
-    var SHELL_ORIGIN = window.location.origin;
+    var RENDERER_ORIGIN = window.location.origin;
+    var SHELL_ORIGIN = readShellOrigin();
     // renderer.js announces itself exactly once. Remember it so the shell can
     // ask after the fact ("was it ready?") instead of relying on catching a
     // one-shot notification at the right moment.
     var lastReady = null;
     var errors = [];
 
+    function readShellOrigin() {
+        try {
+            var value = new URLSearchParams(window.location.search).get("parentOrigin");
+            var parsed = new URL(value);
+            if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1") return "";
+            if (parsed.origin === RENDERER_ORIGIN) return "";
+            return parsed.origin;
+        } catch (e) {
+            return "";
+        }
+    }
+
     // ---------- diagnostics ----------
 
     function recordError(text) {
         if (errors.length >= 12) return;
-        errors.push(String(text).slice(0, 400));
+        errors.push(String(text).slice(0, 256));
     }
 
     // Registered before every other script in the document, so this sees the
@@ -68,11 +78,8 @@
         return {
             from: "renderer",
             reason: reason,
-            href: location.href,
-            origin: SHELL_ORIGIN,
             readySent: !!lastReady,
             listeners: listeners.length,
-            directHandle: directShellReceiver() ? "function" : "missing",
             install: installReport,
             readyState: document.readyState,
             bodyChildren: document.body ? document.body.children.length : -1,
@@ -90,15 +97,9 @@
 
     function beacon(reason) {
         try {
-            fetch("/api/diag", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(snapshot(reason)),
-            }).catch(function () {
-                // Diagnostics must never break the renderer.
-            });
+            post({ type: "diagnostic", report: snapshot(reason) });
         } catch (e) {
-            // Ditto.
+            // Diagnostics must never break the renderer.
         }
     }
 
@@ -138,6 +139,7 @@
 
     window.addEventListener("message", function (ev) {
         if (ev.source !== window.parent) return;
+        if (!SHELL_ORIGIN) return;
         if (ev.origin !== SHELL_ORIGIN) return;
         var envelope = ev.data;
         if (!envelope || typeof envelope !== "object" || envelope.__skim !== true) return;
@@ -146,30 +148,8 @@
 
     // ---------- outbound (renderer -> shell) ----------
 
-    function directShellReceiver() {
-        try {
-            var parentWindow = window.parent;
-            if (!parentWindow || parentWindow === window) return null;
-            var receive = parentWindow.__skimShellReceive;
-            return typeof receive === "function" ? receive : null;
-        } catch (e) {
-            // Cross-origin or detached parent: fall back to postMessage.
-            return null;
-        }
-    }
-
     function post(payload) {
-        var receive = directShellReceiver();
-        if (receive) {
-            setTimeout(function () {
-                try {
-                    receive(payload);
-                } catch (e) {
-                    recordError("direct post failed: " + (e && e.message ? e.message : e));
-                }
-            }, 0);
-            return;
-        }
+        if (!SHELL_ORIGIN) return;
         try {
             window.parent.postMessage({ __skim: true, payload: payload }, SHELL_ORIGIN);
         } catch (e) {
@@ -187,10 +167,10 @@
      * works. Inside the GitHub Copilot app it does not: the canvas is rendered
      * by a real WebView2, which has already installed the *app's* bridge there
      * as a getter-only accessor. Assigning to it throws a TypeError under
-     * `"use strict"`, and that used to abort this entire module — so
-     * `__skimBridge` below was never published, renderer.js found the app's
-     * bridge instead of ours, and its `ready` was posted to the app rather than
-     * to the shell. The preview then stayed blank until the shell gave up.
+     * `"use strict"`, and that used to abort this entire module. renderer.js
+     * then found the app's bridge instead of ours, and its `ready` was posted to
+     * the app rather than to the shell. The preview stayed blank until the shell
+     * gave up.
      *
      * So: define rather than assign, fall through progressively blunter
      * strategies, and never throw. `installReport` records what happened; the
@@ -198,7 +178,12 @@
 
     var webviewShim = {
         postMessage: function (payload) {
-            if (payload && payload.type === "ready") lastReady = payload;
+            if (payload && payload.type === "ready") {
+                lastReady = payload;
+                post(payload);
+                beacon("bridge-installed");
+                return;
+            }
             post(payload);
         },
         addEventListener: function (type, callback) {
@@ -261,11 +246,11 @@
             try {
                 apply();
             } catch (e) {
-                report.failures.push(name + ": " + ((e && e.message) || e));
+                report.failures.push((name + ": " + ((e && e.message) || e)).slice(0, 256));
                 return;
             }
             if (shimInstalled()) report.strategy = name;
-            else report.failures.push(name + ": no effect");
+            else report.failures.push((name + ": no effect").slice(0, 256));
         }
 
         // 1. The ordinary case: `webview` is absent, or present but replaceable.
@@ -309,19 +294,5 @@
     }
 
     var installReport = installWebviewShim();
-
-    // The shell reads this directly (same-origin) to drive the renderer and to
-    // interrogate a failed boot without needing any message to get through.
-    // Defined rather than assigned for the same reason as the shim above.
-    defineValue(window, "__skimBridge", {
-        version: 3,
-        deliver: deliver,
-        isReady: function () {
-            return !!lastReady;
-        },
-        errors: errors,
-        install: installReport,
-        snapshot: snapshot,
-        beacon: beacon,
-    });
+    if (!SHELL_ORIGIN) recordError("invalid or missing parent origin");
 })();

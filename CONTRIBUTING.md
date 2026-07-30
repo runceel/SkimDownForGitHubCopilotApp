@@ -25,16 +25,20 @@ must keep the branch protection or ruleset aligned with this section.
 2. Do not expose repository or environment secrets to fork workflows. This repository's
    verification workflow has read-only contents permission and uses no secrets.
 3. Confirm that action references remain pinned to full commit SHAs.
-4. For vendored changes, require a full upstream commit SHA, updated component metadata,
-   a focused asset diff, and a successful `Verify vendored assets` check.
+4. For vendored changes, require an immutable source, updated component metadata, a focused
+   asset diff, and a successful `Verify vendored assets` check.
 5. Check out or install the extension only after the executable diff has code-owner approval.
 
 ## Updating vendored assets
 
-Vendored files are copied byte-for-byte from the pinned SkimDown for Windows revision. Never
-edit `web/vendor/**` by hand.
+Vendored files are reconstructed byte-for-byte from sources pinned in `vendor-lock.json`.
+Most come from a SkimDown for Windows commit. A narrowly scoped security update may instead
+pin an individual file to the dependency's immutable upstream commit. Never edit
+`web/vendor/**` by hand.
 
 1. Review the upstream SkimDown for Windows commit and copy its full 40-character SHA.
+   For an independently updated file, review its official release and pin its immutable
+   upstream commit URL in that file's `source` field.
 2. From the repository root, run:
 
    ```console

@@ -4,5 +4,8 @@
 .github/extensions/skimdown/web/renderer.js    text eol=lf
 .github/extensions/skimdown/web/renderer.html  text eol=lf
 .github/extensions/skimdown/web/skimdown.css   text eol=lf
-.github/extensions/skimdown/web/vendor/**      text eol=lf
-.github/extensions/skimdown/web/vendor/**/*.woff2 binary
+.github/extensions/skimdown/web/vendor/**/*.js    text eol=lf
+.github/extensions/skimdown/web/vendor/**/*.css   text eol=lf
+.github/extensions/skimdown/web/vendor/**/*.html  text eol=lf
+.github/extensions/skimdown/web/vendor/**/*.md    text eol=lf
+*.woff2 -text

@@ -8,11 +8,11 @@
   },
   "components": {
     "dompurify": {
-      "version": "3.1.6",
+      "version": "3.4.12",
       "license": "Apache-2.0 OR MPL-2.0",
       "homepage": "https://github.com/cure53/DOMPurify",
-      "purl": "pkg:npm/dompurify@3.1.6",
-      "officialSource": "https://registry.npmjs.org/dompurify/-/dompurify-3.1.6.tgz"
+      "purl": "pkg:npm/dompurify@3.4.12",
+      "officialSource": "https://github.com/cure53/DOMPurify/releases/download/3.4.12/purify.min.js"
     },
     "highlight.js": {
       "version": "11.10.0",
@@ -65,7 +65,7 @@
     }
   },
   "files": [
-    { "path": "dompurify.min.js", "component": "dompurify", "sha256": "c0845096a7c4a6741f362ac506c94c1c7d27dc603bcc1bf64a587f76f2dbe3a1" },
+    { "path": "dompurify.min.js", "component": "dompurify", "source": "https://raw.githubusercontent.com/cure53/DOMPurify/a9ca1e537422319a557a9a2aa61f003b23b4a197/dist/purify.min.js", "sha256": "c45ba939765574f96cbf35ee9b6d89f73756a17921814425e74b82f7c54603ce" },
     { "path": "github-dark.min.css", "component": "highlight.js", "sha256": "ee2461da81ff8bd1f4418691ab06cc93d5c9c7a77f244ae3d6e65188127b576f" },
     { "path": "github.min.css", "component": "highlight.js", "sha256": "d1e528743a74aa68cc837c18c1347bb0fd7f3261d3622c9787b111628bfa7333" },
     { "path": "highlight.min.js", "component": "highlight.js", "sha256": "471ef9ae90c407af440fcdc48edfeeb562106b3267bd12d99071c162fb52ed32" },

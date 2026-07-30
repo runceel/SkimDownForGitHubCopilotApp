@@ -1,4 +1,4 @@
-# 0006: vendored 実行資産の取得元と byte 列を固定する
+# 0009: vendored 実行資産の取得元と byte 列を固定する
 
 - Status: Accepted
 - Date: 2026-07-30
@@ -14,12 +14,13 @@ canvas 拡張は checkout 後に実行されるため、同梱する JavaScript�
 
 ## Decision
 
-vendored 実行資産は、レビュー済み上流 repository の commit を完全 SHA で固定し、
-その revision の byte 列を SHA-256 台帳で列挙する。台帳にない追加、欠落、hash 不一致、
-固定取得元との不一致を CI で拒否する。依存コンポーネントの version、license、公式配布元は
-台帳と生成 SBOM に記録する。
+vendored 実行資産は、レビュー済み上流 repository の commit を完全 SHA で固定する。
+緊急の依存物修正を個別に取り込む場合は、その公式 upstream の immutable な commit を
+ファイル単位で固定する。各取得元の byte 列を SHA-256 台帳で列挙し、台帳にない追加、欠落、
+hash 不一致、固定取得元との不一致を CI で拒否する。依存コンポーネントの version、license、
+公式配布元は台帳と生成 SBOM に記録する。
 
-更新は固定上流からの再取得として行い、実行時と公開物作成時には外部 package manager へ
+更新は固定取得元からの再取得として行い、実行時と公開物作成時には外部 package manager へ
 依存しない。extension 境界と検証制御の変更は code owner のレビュー対象とし、default branch
 の保護規則でそのレビューと検証 check を必須にする。
 
@@ -41,8 +42,8 @@ vendored 実行資産は、レビュー済み上流 repository の commit を完
 
 ### Negative
 
-- vendored 更新には上流 commit、component metadata、hash 台帳、SBOM の同時レビューが必要になる。
-- 固定上流が到達不能な場合、source 照合 CI は復旧まで失敗する。
+- vendored 更新には固定取得元、component metadata、hash 台帳、SBOM の同時レビューが必要になる。
+- 固定取得元が到達不能な場合、source 照合 CI は復旧まで失敗する。
 - code owner 必須化は repository 側の branch protection または ruleset の継続運用を必要とする。
 
 ### Follow-up
