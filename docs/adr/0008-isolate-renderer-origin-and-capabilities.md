@@ -1,4 +1,4 @@
-# 0006: renderer を専用 origin と sandbox へ隔離する
+# 0008: renderer を専用 origin と sandbox へ隔離する
 
 - Status: Accepted
 - Date: 2026-07-30
@@ -10,6 +10,10 @@
 renderer は信頼されたコードだが、信頼できない Markdown を処理する。シェルと renderer を
 同一 origin に置くと、サニタイズや renderer の欠陥でスクリプト実行に至った場合に、
 状態 API とシェルへ同一 origin 権限で到達できる。
+
+[0007](0007-protect-loopback-apis-with-instance-capabilities.md) はシェルと renderer が同一
+origin だった時点で、両者が API capability を共有する判断を記録した。renderer を別 origin
+へ移す場合もシェル API の capability 保護は維持するが、renderer に capability を渡す必要はない。
 
 同一 origin の直接状態確認は起動合意を安定させる一方、権限分離と両立しない。また、
 資源取得を制約するポリシーがなければ、意図しない外部接続やコード実行をブラウザー側で

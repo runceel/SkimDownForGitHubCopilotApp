@@ -1,9 +1,9 @@
 # 0001: 上流 renderer を互換レイヤーの背後で利用する
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-07-30
 - Supersedes: なし
-- Superseded by: なし
+- Superseded by: [0006](0006-allow-bounded-local-renderer-security-hardening.md)
 
 ## Context
 

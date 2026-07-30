@@ -3,7 +3,7 @@
 - Status: Superseded
 - Date: 2026-07-30
 - Supersedes: なし
-- Superseded by: [0006](0006-isolate-renderer-origin-and-capabilities.md)
+- Superseded by: [0008](0008-isolate-renderer-origin-and-capabilities.md)
 
 ## Context
 

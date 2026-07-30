@@ -54,7 +54,7 @@
 
     function recordError(text) {
         if (errors.length >= 12) return;
-        errors.push(String(text).slice(0, 400));
+        errors.push(String(text).slice(0, 256));
     }
 
     // Registered before every other script in the document, so this sees the
@@ -78,12 +78,8 @@
         return {
             from: "renderer",
             reason: reason,
-            href: location.href,
-            origin: RENDERER_ORIGIN,
-            shellOrigin: SHELL_ORIGIN,
             readySent: !!lastReady,
             listeners: listeners.length,
-            transport: "postMessage",
             install: installReport,
             readyState: document.readyState,
             bodyChildren: document.body ? document.body.children.length : -1,
@@ -250,11 +246,11 @@
             try {
                 apply();
             } catch (e) {
-                report.failures.push(name + ": " + ((e && e.message) || e));
+                report.failures.push((name + ": " + ((e && e.message) || e)).slice(0, 256));
                 return;
             }
             if (shimInstalled()) report.strategy = name;
-            else report.failures.push(name + ": no effect");
+            else report.failures.push((name + ": no effect").slice(0, 256));
         }
 
         // 1. The ordinary case: `webview` is absent, or present but replaceable.

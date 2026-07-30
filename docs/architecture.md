@@ -66,7 +66,8 @@ flowchart TB
 1 つの canvas インスタンスは、異なるポートを持つ 3 つの loopback origin を使う。
 
 - **シェル origin** は、拡張が管理するシェル、状態 API、イベントストリームだけを提供する。
-  ここは信頼されたアプリケーションコードと状態操作の領域である。
+  ここは信頼されたアプリケーションコードと状態操作の領域であり、API とイベントストリームは
+  インスタンス固有の capability を持つ同一 origin の要求だけを受け付ける。
 - **renderer origin** は、renderer とベンダー資産だけを提供し、状態 API とシェル資産を
   提供しない。
 - **コンテンツ origin** は、開いている文書から参照されるローカルメディアだけを提供する。
@@ -79,6 +80,8 @@ renderer のコードは信頼された上流資産だが、入力される Mark
 Markdown 由来の HTML は renderer のサニタイズ処理を経由し、ローカルメディアは
 特権を持つシェル origin から配信しない。各 origin は役割別 CSP を HTTP header で配信し、
 renderer からシェル API と未許可の外部資源へ接続できないようにする。
+サニタイズは inert な DOM 上で完了させ、URL 解決を含む後処理にも未サニタイズの node を
+渡さない。サニタイザーを利用できない場合は、Markdown を表示せず fail closed とする。
 
 ## ライフサイクル
 
@@ -109,6 +112,8 @@ canvas の `open()` は、初回にインスタンス固有の実行時資源を
 - **canvas host と拡張プロバイダ**は、canvas の open、close、action 契約で通信する。
 - **canvas UI と拡張プロセス**は、loopback HTTP で操作し、SSE で状態と文書の変更を受け取る。
   要求と継続的な更新を分離することで、ファイル変更や別経路の action を同じ表示へ反映する。
+  インスタンス capability、loopback Host、Origin、Fetch Metadata をすべて検証し、状態変更は
+  JSON 要求に限定する。capability はインスタンスと同じ寿命を持ち、永続化しない。
 - **シェルと renderer**は、送信元 window、origin、封筒、メッセージ種別を検証する
   `postMessage` だけで通信する。通知を 1 回受信できたかではなく、シェルが準備状態を
   再問い合わせし、renderer が現在状態で応答して合意する。
@@ -146,15 +151,18 @@ ephemeral であり、再接続後の調査には残らない。
 
 そのため、renderer とシェルが起動初期から自身の状態とエラーを収集する。renderer の診断は
 検証済みメッセージでシェルへ渡し、シェル origin の診断経路を通じて拡張へ返す。
-診断は `$COPILOT_HOME` 配下の上限付き成果物へ残し、
-成功時の経路と失敗理由の両方を事後確認できるようにする。診断処理そのものの失敗は、
-読書 UI を停止させてはならない。また、診断へ Markdown 本文を記録しない。
+この経路はインスタンス固有の capability で認証し、
+許可済み schema、body サイズ、受付頻度を越える入力を拒否する。診断は
+`$COPILOT_HOME` 配下で byte 上限内に rotation され、成功時の経路と失敗理由の両方を
+事後確認できるようにする。診断処理そのものの失敗は、読書 UI を停止させてはならない。
+また、診断へ Markdown 本文、URL、user agent、workspace/session 情報を記録しない。
 
 ## 実装者が守る不変条件
 
-1. `renderer.js`、`skimdown.css`、`vendor/**` は、採用した
-   SkimDownForWindows の上流リビジョンからのバイト単位コピーとする。手で編集しない。
-   変更が必要なら上流を修正し、上流リビジョンを更新して再コピーする。
+1. `skimdown.css`、`vendor/**` は、採用した SkimDownForWindows の上流リビジョンからの
+   バイト単位コピーとする。`renderer.js` も上流同期を原則とするが、安全な上流リビジョンを
+   待てない脆弱性には、回帰テスト付きの最小限のローカル hardening patch を許可する。
+   上流へ修正が入った時点で差分を解消し、再び上流コピーへ戻す。
 2. canvas の frame はすでに WebView2 内で動き、`window.chrome.webview` はホストに
    占有されている。素の代入は strict mode で `TypeError` になり得るため、
    互換シムは既存プロパティを調査し、段階的フォールバックで導入する。
@@ -171,6 +179,11 @@ ephemeral であり、再接続後の調査には残らない。
 9. 実行時状態と診断でユーザーの worktree を汚さない。
 10. テーマはホストトークンへ追従し、独立した常用パレットを導入しない。
 11. 各 origin の CSP は `default-src 'none'` を基点にし、新しい資源や接続先を暗黙に許可しない。
+12. シェル origin の API と SSE は、インスタンス capability と同一 origin のブラウザー要求を
+    必須にする。loopback bind や port 番号だけを認証として扱わない。
+13. ローカルファイル操作は、workspace、セッションで登録された文書、または明示的に承認された
+    root の内側に限定し、クライアントが送るパスをそのまま信頼しない。
+14. 診断 API は schema、body サイズ、受付頻度、保存総量の境界を外さない。
 
 これらを変更する必要がある場合は、コード変更より先に、または同じ変更の中で ADR を追加し、
 この文書を新しい現状へ更新する。

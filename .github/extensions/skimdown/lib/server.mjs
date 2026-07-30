@@ -11,7 +11,7 @@
  */
 
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -34,7 +34,16 @@ import {
     rememberSelection,
     registryEvents,
 } from "./sessionDocs.mjs";
-import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag, diagFile } from "./paths.mjs";
+import { sessionArtifactsDir, resolveWorkspaceRoot, appendDiag } from "./paths.mjs";
+import {
+    DIAG_ENTRY_MAX_BYTES,
+    DIAG_REQUEST_MAX_BYTES,
+    DIAG_SCHEMA_VERSION,
+    DiagnosticValidationError,
+    createDiagnosticRateLimiter,
+    diagnosticByteLength,
+    validateDiagnostic,
+} from "./diagnostics.mjs";
 import { createWatcher } from "./watcher.mjs";
 import { isMarkdownFile } from "./scanner.mjs";
 
@@ -70,6 +79,8 @@ const CONTENT_TYPES = new Map(Object.entries({
 const SHELL_ASSETS = new Set(["shell.html", "shell.css", "shell.js"]);
 const RENDERER_ASSETS = new Set(["renderer.html", "bridge.js", "renderer.js", "skimdown.css"]);
 const SSE_KEEPALIVE_MS = 25000;
+const CAPABILITY_BYTES = 32;
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 
 /**
  * Create and start the servers plus all state for one canvas instance.
@@ -89,8 +100,14 @@ export async function createInstance(ctx) {
     };
 
     const sseClients = new Set();
+    const diagnosticRateLimiter = createDiagnosticRateLimiter();
     /** token -> absolute directory, backing the content origin. */
     const contentDirs = new Map();
+    const approvedRoots = new Set();
+    const capabilityToken = randomBytes(CAPABILITY_BYTES).toString("base64url");
+
+    approveRoot(state.workspacePath);
+    approveRoot(sessionArtifactsDir(ctx.sessionId));
 
     const watcher = createWatcher(() => {
         void handleFilesystemChange();
@@ -121,18 +138,56 @@ export async function createInstance(ctx) {
     const assetServer = createServer((req, res) => {
         void handleAssetRequest(req, res).catch((error) => {
             ctx.log?.(`skimdown request failed: ${error?.message || error}`);
-            endWithStatus(res, 500, "internal error");
+            const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+            if ((req.url || "").startsWith("/api/")) {
+                sendJson(res, status, { error: status === 500 ? "internal error" : error.message });
+            } else {
+                endWithStatus(res, status, status === 500 ? "internal error" : error.message);
+            }
         });
     });
     await listen(assetServer);
     const assetPort = portOf(assetServer);
     assetBaseUri = `http://127.0.0.1:${assetPort}/`;
-    const url = assetBaseUri;
+    const assetOrigin = originOf(assetBaseUri);
+    const url = `${assetBaseUri}#token=${encodeURIComponent(capabilityToken)}`;
 
     // ---------- state helpers ----------
 
+    function approveRoot(root) {
+        if (typeof root !== "string" || root.length === 0) return;
+        approvedRoots.add(canonicalPath(root));
+    }
+
+    function approveListing(listing) {
+        if (listing?.root) approveRoot(listing.root);
+        for (const group of listing?.groups || []) {
+            for (const entry of group.entries || []) {
+                if (entry.path) approveRoot(path.dirname(entry.path));
+            }
+        }
+    }
+
+    function isApprovedPath(candidate) {
+        const resolved = canonicalPath(candidate);
+        for (const root of approvedRoots) {
+            if (isInside(root, resolved)) return true;
+        }
+        return false;
+    }
+
+    function requireApprovedPath(candidate) {
+        if (isApprovedPath(candidate)) return;
+        throw httpError(403, "path is outside the approved roots");
+    }
+
+    function approveTarget(classified) {
+        if (classified.kind === "folder") approveRoot(classified.path);
+        if (classified.kind === "file") approveRoot(path.dirname(classified.path));
+    }
+
     function contentTokenFor(dir) {
-        const resolved = path.resolve(dir);
+        const resolved = canonicalPath(dir);
         const token = createHash("sha256").update(resolved).digest("hex").slice(0, 16);
         contentDirs.set(token, resolved);
         return token;
@@ -144,6 +199,7 @@ export async function createInstance(ctx) {
             state.source,
             state.root,
         );
+        approveListing(state.listing);
         updateWatchTargets();
         if (push) broadcast("state", await buildState());
         return state.listing;
@@ -187,7 +243,8 @@ export async function createInstance(ctx) {
     }
 
     async function selectFile(absPath, { push = true } = {}) {
-        const resolved = path.resolve(absPath);
+        const resolved = canonicalPath(absPath);
+        requireApprovedPath(resolved);
         const file = await readMarkdownFile(resolved);
         const dir = path.dirname(resolved);
         const token = contentTokenFor(dir);
@@ -283,14 +340,18 @@ export async function createInstance(ctx) {
     }
 
     async function setSource(source, rootPath) {
-        state.source = source;
+        let nextRoot = state.root;
         if (source === SOURCE_WORKSPACE) {
-            state.root = state.workspacePath;
-        } else if (source === SOURCE_PATH) {
-            state.root = rootPath ? path.resolve(rootPath) : state.root;
-        } else {
-            state.root = null;
+            nextRoot = state.workspacePath;
+        } else if (source === SOURCE_PATH && rootPath) {
+            nextRoot = path.resolve(rootPath);
+            requireApprovedPath(nextRoot);
+        } else if (source !== SOURCE_PATH) {
+            nextRoot = null;
         }
+
+        state.source = source;
+        state.root = nextRoot;
         state.notice = null;
         await updateSettings({ lastSource: source });
         await refreshListing();
@@ -300,8 +361,12 @@ export async function createInstance(ctx) {
         else broadcast("empty", {});
     }
 
-    async function openTarget(target) {
+    async function openTarget(target, { approve = false } = {}) {
         const classified = await classifyPath(target, state.workspacePath);
+        if (classified.kind === "folder" || classified.kind === "file") {
+            if (approve) approveTarget(classified);
+            else requireApprovedPath(classified.path);
+        }
         if (classified.kind === "folder") {
             state.source = SOURCE_PATH;
             state.root = classified.path;
@@ -386,10 +451,22 @@ export async function createInstance(ctx) {
             csp: shellCsp(rendererBaseUri),
             corp: "same-origin",
         });
-        const parsed = new URL(req.url || "/", "http://127.0.0.1");
-        const pathname = decodeURIComponent(parsed.pathname);
+        if (!hasExpectedHost(req, assetPort)) return endWithStatus(res, 403, "invalid host");
 
-        if (pathname === "/events") return handleSse(res);
+        let parsed;
+        let pathname;
+        try {
+            parsed = new URL(req.url || "/", assetOrigin);
+            pathname = decodeURIComponent(parsed.pathname);
+        } catch {
+            return endWithStatus(res, 400, "invalid request target");
+        }
+
+        if (pathname === "/events") {
+            const rejection = validateProtectedRequest(req, parsed, assetOrigin, capabilityToken, true);
+            if (rejection) return sendJson(res, rejection.status, { error: rejection.message });
+            return handleSse(res);
+        }
         if (pathname.startsWith("/api/")) return handleApi(req, res, pathname, parsed);
         if (req.method !== "GET" && req.method !== "HEAD") {
             return endWithStatus(res, 405, "method not allowed");
@@ -435,13 +512,34 @@ export async function createInstance(ctx) {
     }
 
     async function handleApi(req, res, pathname, parsed) {
+        const rejection = validateProtectedRequest(req, parsed, assetOrigin, capabilityToken, false);
+        if (rejection) return sendJson(res, rejection.status, { error: rejection.message });
+
         if (req.method === "GET" && pathname === "/api/state") {
             return sendJson(res, 200, await buildState());
         }
 
-        if (req.method !== "POST") return endWithStatus(res, 405, "method not allowed");
+        if (req.method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
+        if (!isJsonContentType(req.headers["content-type"])) {
+            return sendJson(res, 415, { error: "application/json is required" });
+        }
 
-        const body = await readJsonBody(req);
+        if (pathname === "/api/diag") {
+            const rate = diagnosticRateLimiter.take();
+            if (!rate.allowed) {
+                return sendJson(
+                    res,
+                    429,
+                    { error: "rate limit exceeded" },
+                    { "Retry-After": String(Math.ceil(rate.retryAfterMs / 1000)) },
+                );
+            }
+        }
+
+        const body = await readJsonBody(
+            req,
+            pathname === "/api/diag" ? DIAG_REQUEST_MAX_BYTES : MAX_REQUEST_BYTES,
+        );
 
         switch (pathname) {
             case "/api/select": {
@@ -460,7 +558,7 @@ export async function createInstance(ctx) {
                 return sendJson(res, 200, { ok: true });
             }
             case "/api/open": {
-                const result = await openTarget(String(body.path || ""));
+                const result = await openTarget(String(body.path || ""), { approve: true });
                 return sendJson(res, 200, { ok: true, ...result });
             }
             case "/api/refresh": {
@@ -486,18 +584,32 @@ export async function createInstance(ctx) {
                 // evidence is gone before anyone can read it. The file is
                 // capped, so recording healthy boots too costs nothing and
                 // makes "it worked, and how" observable.
-                const healthy =
-                    body.reason === "bridge-installed" || body.reason === "shell-boot";
-                await appendDiag({
+                let diagnostic;
+                try {
+                    diagnostic = validateDiagnostic(body);
+                } catch (error) {
+                    if (error instanceof DiagnosticValidationError) {
+                        return sendJson(res, 400, { error: error.message });
+                    }
+                    throw error;
+                }
+                const entry = {
+                    schemaVersion: DIAG_SCHEMA_VERSION,
                     at: new Date().toISOString(),
                     instanceId: state.instanceId,
-                    ...body,
-                });
+                    ...diagnostic,
+                };
+                if (diagnosticByteLength(entry) > DIAG_ENTRY_MAX_BYTES) {
+                    return sendJson(res, 413, { error: "diagnostic entry too large" });
+                }
+                const healthy =
+                    diagnostic.reason === "bridge-installed" || diagnostic.reason === "shell-boot";
+                await appendDiag(entry);
                 ctx.log?.(
-                    `renderer diagnostic (${state.instanceId}): ${JSON.stringify(body).slice(0, 900)}`,
+                    `renderer diagnostic (${state.instanceId}): ${JSON.stringify(diagnostic).slice(0, 900)}`,
                     { level: healthy ? "info" : "warning" },
                 );
-                return sendJson(res, 200, { ok: true, file: diagFile() });
+                return sendJson(res, 200, { ok: true });
             }
             case "/api/open-external": {
                 const opened = openExternal(String(body.href || ""));
@@ -528,6 +640,7 @@ export async function createInstance(ctx) {
         } catch {
             target = path.resolve(baseDir, rawPath);
         }
+        if (!isApprovedPath(target)) return { kind: "forbidden" };
 
         const classified = await classifyPath(target);
         if (classified.kind === "file") return { kind: "markdown", path: classified.path };
@@ -542,6 +655,7 @@ export async function createInstance(ctx) {
             csp: rendererCsp(assetBaseUri, contentBaseUri),
             corp: "same-site",
         });
+        if (!hasExpectedHost(req, rendererPort)) return endWithStatus(res, 403, "invalid host");
         if (req.method !== "GET" && req.method !== "HEAD") {
             return endWithStatus(res, 405, "method not allowed");
         }
@@ -575,6 +689,8 @@ export async function createInstance(ctx) {
         res.writeHead(200, {
             "Content-Type": type,
             "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
         });
         res.end(req.method === "HEAD" ? undefined : data);
     }
@@ -586,6 +702,7 @@ export async function createInstance(ctx) {
             csp: "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; object-src 'none'; sandbox",
             corp: "same-site",
         });
+        if (!hasExpectedHost(req, contentPort)) return endWithStatus(res, 403, "invalid host");
         if (req.method !== "GET" && req.method !== "HEAD") {
             return endWithStatus(res, 405, "method not allowed");
         }
@@ -596,7 +713,13 @@ export async function createInstance(ctx) {
         const dir = contentDirs.get(segments[1]);
         if (!dir) return endWithStatus(res, 404, "not found");
 
-        const resolved = path.resolve(dir, ...segments.slice(2));
+        const candidate = path.resolve(dir, ...segments.slice(2));
+        let resolved;
+        try {
+            resolved = await fsp.realpath(candidate);
+        } catch {
+            return endWithStatus(res, 404, "not found");
+        }
         if (!isInside(dir, resolved)) return endWithStatus(res, 403, "forbidden");
 
         const type = CONTENT_TYPES.get(path.extname(resolved).toLowerCase());
@@ -644,6 +767,7 @@ export async function createInstance(ctx) {
     if (state.source === SOURCE_PATH) {
         const registry = await loadRegistry(ctx.sessionId);
         state.root = registry.lastRoot || state.workspacePath;
+        approveRoot(state.root);
         if (!state.root) state.source = SOURCE_SESSION;
     }
     await refreshListing();
@@ -782,28 +906,91 @@ function openExternal(href) {
     }
 }
 
-async function readJsonBody(req) {
+async function readJsonBody(req, maxBytes) {
+    const declaredLength = Number(req.headers["content-length"]);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+        throw httpError(413, "request body too large");
+    }
+
     const chunks = [];
     let size = 0;
     for await (const chunk of req) {
         size += chunk.length;
-        if (size > 8 * 1024 * 1024) throw new Error("request body too large");
+        if (size > maxBytes) throw httpError(413, "request body too large");
         chunks.push(chunk);
     }
-    if (chunks.length === 0) return {};
+    if (chunks.length === 0) throw httpError(400, "JSON body is required");
+    let parsed;
     try {
-        const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        return parsed && typeof parsed === "object" ? parsed : {};
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     } catch {
-        return {};
+        throw httpError(400, "invalid JSON body");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw httpError(400, "JSON body must be an object");
+    }
+    return parsed;
+}
+
+function canonicalPath(value) {
+    const resolved = path.resolve(value);
+    try {
+        return fs.realpathSync.native(resolved);
+    } catch {
+        return resolved;
     }
 }
 
-function sendJson(res, status, payload) {
+function hasExpectedHost(req, port) {
+    return req.headers.host === `127.0.0.1:${port}`;
+}
+
+function validateProtectedRequest(req, parsed, expectedOrigin, capabilityToken, sse) {
+    const suppliedToken = sse
+        ? parsed.searchParams.get("token")
+        : singleHeader(req.headers["x-skimdown-capability"]);
+    if (!safeTokenEqual(suppliedToken, capabilityToken)) {
+        return { status: 401, message: "invalid capability" };
+    }
+
+    if (singleHeader(req.headers["sec-fetch-site"]) !== "same-origin") {
+        return { status: 403, message: "cross-site request denied" };
+    }
+
+    const origin = singleHeader(req.headers.origin);
+    const originRequired = sse || req.method !== "GET";
+    if ((originRequired && !origin) || (origin && origin !== expectedOrigin)) {
+        return { status: 403, message: "invalid origin" };
+    }
+    return null;
+}
+
+function singleHeader(value) {
+    return Array.isArray(value) ? value[0] : value;
+}
+
+function safeTokenEqual(left, right) {
+    if (typeof left !== "string" || typeof right !== "string") return false;
+    const leftBytes = Buffer.from(left);
+    const rightBytes = Buffer.from(right);
+    return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+}
+
+function isJsonContentType(value) {
+    if (typeof value !== "string") return false;
+    return value.split(";", 1)[0].trim().toLowerCase() === "application/json";
+}
+
+function httpError(statusCode, message) {
+    return Object.assign(new Error(message), { statusCode });
+}
+
+function sendJson(res, status, payload, headers = {}) {
     const body = JSON.stringify(payload ?? null);
     res.writeHead(status, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
+        ...headers,
     });
     res.end(body);
 }

@@ -30,7 +30,14 @@ test("serves shell, renderer, and content with isolated capabilities", async () 
     try {
         const shellResponse = await fetch(instance.url);
         const shellHtml = await shellResponse.text();
-        const stateResponse = await fetch(new URL("/api/state", instance.url));
+        const panelUrl = new URL(instance.url);
+        const token = new URLSearchParams(panelUrl.hash.slice(1)).get("token");
+        const stateResponse = await fetch(new URL("/api/state", instance.url), {
+            headers: {
+                "Sec-Fetch-Site": "same-origin",
+                "X-SkimDown-Capability": token,
+            },
+        });
         const state = await stateResponse.json();
         const shellOrigin = new URL(instance.url).origin;
         const rendererOrigin = new URL(state.rendererBaseUri).origin;

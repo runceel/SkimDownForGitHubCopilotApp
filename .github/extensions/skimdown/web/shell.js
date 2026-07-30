@@ -18,6 +18,7 @@
     var ZOOM_MAX = 3.0;
     var ZOOM_STEP = 1.1;
     var CONTENT_WIDTHS = ["760px", "960px", "1200px", "none"];
+    var CAPABILITY_TOKEN = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
 
     var el = {
         body: document.body,
@@ -171,7 +172,7 @@
             case "diagnostic":
                 return !!msg.report && typeof msg.report === "object";
             case "log":
-                return typeof msg.text === "string" && msg.text.length <= 4000;
+                return typeof msg.text === "string" && msg.text.length <= 256;
             case "link":
                 return typeof msg.href === "string"
                     && msg.href.length <= 8192
@@ -192,9 +193,7 @@
     function describeRenderer() {
         return {
             retried: handshakeRetried,
-            logs: rendererLogs.slice(0, 6),
-            rendererOrigin: state.rendererOrigin,
-            frameUrl: el.preview.getAttribute("src"),
+            logs: rendererLogs.slice(0, 6)
         };
     }
 
@@ -207,7 +206,6 @@
         var payload = describeRenderer();
         payload.reason = reason;
         payload.from = "shell";
-        payload.shellOrigin = window.location.origin;
         payload.nested = window.parent !== window;
         // Best effort: diagnostics must never break the shell.
         api("/api/diag", payload).catch(noop);
@@ -217,9 +215,7 @@
         api("/api/diag", {
             reason: "shell-boot",
             from: "shell",
-            shellOrigin: window.location.origin,
-            nested: window.parent !== window,
-            userAgent: navigator.userAgent
+            nested: window.parent !== window
         }).catch(noop);
     }
 
@@ -229,7 +225,7 @@
 
     function reportRendererDiagnostic(report) {
         var errors = Array.isArray(report.errors)
-            ? report.errors.slice(0, 8).map(function (value) { return boundedText(value, 400); })
+            ? report.errors.slice(0, 8).map(function (value) { return boundedText(value, 256); })
             : [];
         for (var i = 0; i < errors.length; i++) recordRendererLog(errors[i], false);
 
@@ -238,7 +234,7 @@
                 strategy: boundedText(report.install.strategy, 80),
                 failures: Array.isArray(report.install.failures)
                     ? report.install.failures.slice(0, 8).map(function (value) {
-                        return boundedText(value, 400);
+                        return boundedText(value, 256);
                     })
                     : [],
             }
@@ -255,7 +251,6 @@
         api("/api/diag", {
             reason: boundedText(report.reason, 80) || "renderer-diagnostic",
             from: "renderer",
-            rendererOrigin: state.rendererOrigin,
             readySent: !!report.readySent,
             listeners: Number.isFinite(report.listeners) ? report.listeners : null,
             readyState: boundedText(report.readyState, 40),
@@ -312,7 +307,7 @@
     }
 
     function recordRendererLog(text, persist) {
-        var line = String(text == null ? "" : text).slice(0, 400);
+        var line = String(text == null ? "" : text).slice(0, 256);
         if (!line) return;
         if (rendererLogs.indexOf(line) < 0) rendererLogs.push(line);
         if (rendererLogs.length > 12) rendererLogs.shift();
@@ -600,9 +595,11 @@
     // ---------- server transport ----------
 
     function api(path, body) {
+        var headers = { "X-SkimDown-Capability": CAPABILITY_TOKEN };
+        if (body !== undefined) headers["Content-Type"] = "application/json";
         return fetch(path, {
             method: body === undefined ? "GET" : "POST",
-            headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+            headers: headers,
             body: body === undefined ? undefined : JSON.stringify(body),
         }).then(function (res) {
             return res.json().catch(function () {
@@ -615,7 +612,7 @@
     }
 
     function connectEvents() {
-        var events = new EventSource("/events");
+        var events = new EventSource("/events?token=" + encodeURIComponent(CAPABILITY_TOKEN));
         var failures = 0;
 
         events.addEventListener("open", function () {

@@ -6,9 +6,10 @@
 //
 // The Markdown rendering pipeline (markdown-it + highlight.js + DOMPurify +
 // KaTeX + Mermaid, GitHub alerts, task lists, colour swatches, in-document
-// search, Mermaid zoom) is `web/renderer.js`, copied byte-for-byte from
-// SkimDown for Windows. `web/bridge.js` re-implements the WebView2 host channel
-// it expects on top of postMessage, so the renderer needs no changes at all.
+// search, Mermaid zoom) is `web/renderer.js`, maintained from SkimDown for
+// Windows with narrowly scoped, regression-tested security hardening when a
+// safe upstream revision is not yet available. `web/bridge.js` re-implements
+// the WebView2 host channel it expects on top of postMessage.
 //
 // Wiring only lives here; the real work is in ./lib.
 
@@ -85,7 +86,7 @@ async function openCanvas(ctx) {
         await instance.setSource(SOURCE_SESSION);
         await instance.showInline(doc.id);
     } else if (typeof input.path === "string" && input.path.trim().length > 0) {
-        await instance.openTarget(input.path);
+        await instance.openTarget(input.path, { approve: true });
     } else if (typeof input.source === "string") {
         await instance.setSource(input.source);
     }
@@ -190,7 +191,7 @@ const canvas = createCanvas({
             handler: async (ctx) => {
                 const instance = await getInstance(ctx.instanceId);
                 try {
-                    return await instance.openTarget(String(ctx.input?.path ?? ""));
+                    return await instance.openTarget(String(ctx.input?.path ?? ""), { approve: true });
                 } catch (error) {
                     throw new CanvasError(error?.code || "open_failed", error?.message || String(error));
                 }
@@ -279,7 +280,6 @@ const canvas = createCanvas({
                     rootLabel: instance.state.listing?.rootLabel ?? null,
                     count: instance.state.listing?.count ?? 0,
                     selection: instance.state.selection,
-                    url: instance.url,
                 };
             },
         },
