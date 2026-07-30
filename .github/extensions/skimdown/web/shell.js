@@ -32,6 +32,7 @@
         btnViewRecent: document.getElementById("btn-view-recent"),
         btnRefresh: document.getElementById("btn-refresh"),
         btnOpenPath: document.getElementById("btn-open-path"),
+        btnPrivacy: document.getElementById("btn-privacy"),
         btnSwapSidebar: document.getElementById("btn-swap-sidebar"),
         btnToggleSidebar: document.getElementById("btn-toggle-sidebar"),
         docTitle: document.getElementById("doc-title"),
@@ -62,6 +63,12 @@
         preview: document.getElementById("preview"),
         emptyState: document.getElementById("empty-state"),
         toast: document.getElementById("toast"),
+        privacyDialog: document.getElementById("privacy-dialog"),
+        btnPrivacyClose: document.getElementById("btn-privacy-close"),
+        persistSessionHistory: document.getElementById("persist-session-history"),
+        sessionRetentionDays: document.getElementById("session-retention-days"),
+        btnClearCurrentHistory: document.getElementById("btn-clear-current-history"),
+        btnClearAllHistory: document.getElementById("btn-clear-all-history"),
     };
 
     var state = {
@@ -701,6 +708,9 @@
         el.btnViewTree.setAttribute("aria-pressed", String(settings.viewMode === "tree"));
         el.btnViewRecent.setAttribute("aria-pressed", String(settings.viewMode === "recent"));
         el.btnZoomReset.textContent = Math.round(settings.zoomFactor * 100) + "%";
+        el.persistSessionHistory.checked = settings.persistSessionHistory === true;
+        el.sessionRetentionDays.value = String(settings.sessionRetentionDays || 7);
+        el.sessionRetentionDays.disabled = settings.persistSessionHistory !== true;
         if (initial !== false) pushSettingsToRenderer();
     }
 
@@ -726,6 +736,53 @@
         };
         if (immediate) send();
         else settingsTimer = setTimeout(send, 250);
+    }
+
+    function setPrivacyBusy(busy) {
+        el.persistSessionHistory.disabled = busy;
+        el.sessionRetentionDays.disabled =
+            busy || !state.settings || state.settings.persistSessionHistory !== true;
+        el.btnClearCurrentHistory.disabled = busy;
+        el.btnClearAllHistory.disabled = busy;
+    }
+
+    function savePrivacySettings(patch, successMessage) {
+        setPrivacyBusy(true);
+        return api("/api/settings", patch)
+            .then(function (result) {
+                state.settings = result.settings;
+                applySettings(state.settings, false);
+                showToast(successMessage);
+            })
+            .catch(function (error) {
+                return api("/api/state")
+                    .then(applyServerState)
+                    .catch(noop)
+                    .then(function () {
+                        showError(error);
+                    });
+            })
+            .finally(function () {
+                setPrivacyBusy(false);
+            });
+    }
+
+    function clearSessionHistory(scope) {
+        var all = scope === "all";
+        var message = all
+            ? "SkimDown が保存したすべてのセッション履歴を消去します。続行しますか？"
+            : "このセッションのインライン本文、パス、選択履歴を消去します。続行しますか？";
+        if (!window.confirm(message)) return;
+
+        setPrivacyBusy(true);
+        api("/api/session-history", { scope: scope })
+            .then(function () {
+                showToast(all ? "保存済み履歴をすべて消去しました" : "このセッションの履歴を消去しました");
+            })
+            .catch(showError)
+            .finally(function () {
+                setPrivacyBusy(false);
+            });
     }
 
     // ---------- sources ----------
@@ -1345,6 +1402,47 @@
             submitPath();
         }
     });
+
+    el.btnPrivacy.addEventListener("click", function () {
+        api("/api/state")
+            .then(function (payload) {
+                applyServerState(payload);
+                if (!el.privacyDialog.open) el.privacyDialog.showModal();
+            })
+            .catch(showError);
+    });
+
+    el.btnPrivacyClose.addEventListener("click", function () {
+        el.privacyDialog.close();
+    });
+
+    el.persistSessionHistory.addEventListener("change", function () {
+        var enabled = el.persistSessionHistory.checked;
+        savePrivacySettings(
+            { persistSessionHistory: enabled },
+            enabled ? "セッション履歴の保存を有効にしました" : "保存を無効にし、保存済み履歴を消去しました",
+        );
+    });
+
+    el.sessionRetentionDays.addEventListener("change", function () {
+        savePrivacySettings(
+            { sessionRetentionDays: Number(el.sessionRetentionDays.value) },
+            "保持期間を更新しました",
+        );
+    });
+
+    el.btnClearCurrentHistory.addEventListener("click", function () {
+        clearSessionHistory("current");
+    });
+
+    el.btnClearAllHistory.addEventListener("click", function () {
+        clearSessionHistory("all");
+    });
+
+    setInterval(function () {
+        if (!el.privacyDialog.open) return;
+        api("/api/state").then(applyServerState).catch(noop);
+    }, 5000);
 
     el.btnSwapSidebar.addEventListener("click", function () {
         saveSettings({

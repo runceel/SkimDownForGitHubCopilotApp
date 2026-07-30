@@ -7,10 +7,13 @@
  */
 
 import { homedir } from "node:os";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
 
 export const EXTENSION_NAME = "skimdown";
+const stateLockContext = new AsyncLocalStorage();
 
 export function copilotHome() {
     const configured = process.env.COPILOT_HOME;
@@ -25,6 +28,14 @@ export function artifactsDir() {
 
 export function settingsFile() {
     return path.join(artifactsDir(), "settings.json");
+}
+
+function stateLockDir() {
+    return path.join(artifactsDir(), ".state-locks");
+}
+
+export function sessionStateDir() {
+    return path.join(artifactsDir(), "sessions");
 }
 
 /* Append-only renderer diagnostics.
@@ -59,7 +70,7 @@ async function trimDiag() {
 }
 
 export function sessionStateFile(sessionId) {
-    return path.join(artifactsDir(), "sessions", `${sanitizeId(sessionId)}.json`);
+    return path.join(sessionStateDir(), `${sanitizeId(sessionId)}.json`);
 }
 
 /** Where the host keeps this session's own artifacts (plan.md, files/). */
@@ -74,6 +85,86 @@ function sanitizeId(sessionId) {
 
 export async function ensureDir(dir) {
     await fs.mkdir(dir, { recursive: true });
+}
+
+/**
+ * Serialize settings and session-history mutations across extension processes.
+ * A stale lock can only remain after a crashed process, so reclaim it after a
+ * generous timeout.
+ */
+export async function withStateLock(operation) {
+    if (stateLockContext.getStore() === true) return operation();
+
+    const lockDir = stateLockDir();
+    await ensureDir(lockDir);
+    const deadline = Date.now() + 5000;
+    const ticketName = `${process.pid}-${randomUUID()}.lock`;
+    const ticketFile = path.join(lockDir, ticketName);
+    await fs.writeFile(ticketFile, "", { encoding: "utf8", flag: "wx" });
+    const publishedAt = (await fs.stat(ticketFile)).mtimeMs;
+
+    try {
+        while (true) {
+            const tickets = await listLiveLockTickets(lockDir);
+            // Order is based on filesystem publication, not intent. Waiting
+            // past the timestamp bucket prevents a same-tick ticket from
+            // appearing later with an earlier lexical tie-breaker.
+            if (tickets[0] === ticketName && Date.now() >= publishedAt + 10) {
+                return await stateLockContext.run(true, operation);
+            }
+            if (Date.now() >= deadline) throw new Error("Timed out waiting for the SkimDown state lock.");
+            await delay(25);
+        }
+    } finally {
+        await fs.unlink(ticketFile).catch((error) => {
+            if (error?.code !== "ENOENT") throw error;
+        });
+    }
+}
+
+async function listLiveLockTickets(lockDir) {
+    const names = (await fs.readdir(lockDir))
+        .filter((name) => /^\d+-[0-9a-f-]+\.lock$/i.test(name));
+    const live = [];
+    const now = Date.now();
+
+    for (const name of names) {
+        let meta;
+        try {
+            meta = await fs.stat(path.join(lockDir, name));
+        } catch (error) {
+            if (error?.code === "ENOENT") continue;
+            throw error;
+        }
+        const pid = Number(/^(\d+)-/.exec(name)?.[1]);
+        const stale =
+            !Number.isSafeInteger(pid)
+            || !isProcessAlive(pid)
+            || now - meta.mtimeMs > 60 * 60 * 1000;
+        if (!stale) {
+            live.push({ name, publishedAt: meta.mtimeMs });
+            continue;
+        }
+        await fs.unlink(path.join(lockDir, name)).catch((error) => {
+            if (error?.code !== "ENOENT") throw error;
+        });
+    }
+    return live
+        .sort((a, b) => a.publishedAt - b.publishedAt || a.name.localeCompare(b.name))
+        .map((ticket) => ticket.name);
+}
+
+function isProcessAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        return error?.code !== "ESRCH";
+    }
+}
+
+function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 /* Resolve the folder the "ワークスペース" source should show.

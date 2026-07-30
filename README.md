@@ -56,6 +56,7 @@ Markdown の探索ルールは SkimDown for Windows の `MarkdownScanner` と同
 | --- | --- |
 | 文書内検索 | `Ctrl+F`、`Enter` / `Shift+Enter` で移動、`Ctrl+E` で選択文字列を検索 |
 | サイドバー開閉 | `Ctrl+B` |
+| プライバシーと履歴 | サイドバー下部の盾ボタンから、保存、保持期間、消去を管理 |
 | ズーム | `Ctrl+;` / `Ctrl+-` / `Ctrl+0`、ツールバーの `+` / `−` / `100%` |
 | 本文の最大幅 | `Ctrl+[` / `Ctrl+]` |
 | パスを開く | `Ctrl+O` |
@@ -101,12 +102,21 @@ SkimDown のカスタムテーマ機構（`--skim-*`）に写して渡します�
 
 ## 状態の保存先
 
-リポジトリには何も書きません。
+リポジトリには何も書きません。セッション履歴は既定では端末へ保存せず、
+開いている拡張プロセスのメモリ内だけで保持します。
 
 | スコープ | 場所 |
 | --- | --- |
 | ユーザー全体の設定 | `$COPILOT_HOME/extensions/skimdown/artifacts/settings.json` |
-| セッションごとの記録 | `$COPILOT_HOME/extensions/skimdown/artifacts/sessions/<sessionId>.json` |
+| セッションごとの履歴（保存を有効にした場合のみ） | `$COPILOT_HOME/extensions/skimdown/artifacts/sessions/<sessionId>.json` |
+
+保存対象は、`show_markdown` で受け取った本文（最大 50 文書、各 2 MB）、このセッションで
+編集した Markdown のパス、最後の選択とルートです。保持期間は 1 日、7 日、30 日から選択でき、
+期限切れデータは自動削除されます。盾ボタンから現在のセッション、または保存済みの全セッションを
+直ちに消去できます。保存を無効にした場合も、保存済み履歴をすべて削除します。
+
+`plan.md`、チェックポイント、`files/**` は GitHub Copilot app が管理するセッション成果物です。
+SkimDown の履歴消去はこれらの原本を削除しません。
 
 ## ライセンス
 
