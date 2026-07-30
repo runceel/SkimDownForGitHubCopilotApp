@@ -1,7 +1,9 @@
 # SkimDown for GitHub Copilot App
 
-[SkimDown for Windows](https://github.com/runceel/SkimDownForWindows)（WinUI 3 + WebView2 の
-落ち着いた Markdown リーダー）の読書体験を、**GitHub Copilot app の extension canvas** に移植したものです。
+macOS 向け Markdown リーダー [SkimDown](https://skimdown.07jp27.net/) がオリジナルです。
+原作者の許可を得て、その読書体験を
+[SkimDown for Windows](https://github.com/runceel/SkimDownForWindows)（WinUI 3 + WebView2）へ移植し、
+さらに **GitHub Copilot app の extension canvas** として展開したものです。
 
 用途を 2 つに絞っています。
 
