@@ -129,7 +129,7 @@ test("diagnostic API enforces capability, content, size, schema, and rate limits
             log() {},
         });
         const canvasUrl = new URL(instance.url);
-        const token = new URLSearchParams(canvasUrl.hash.slice(1)).get("capability");
+        const token = new URLSearchParams(canvasUrl.hash.slice(1)).get("token");
         assert.equal(canvasUrl.search, "");
         const endpoint = new URL("/api/diag", canvasUrl);
         const validBody = { from: "shell", reason: "shell-boot", nested: false };
@@ -142,6 +142,8 @@ test("diagnostic API enforces capability, content, size, schema, and rate limits
             headers: {
                 "Content-Type": "text/plain",
                 "X-SkimDown-Capability": token,
+                "Sec-Fetch-Site": "same-origin",
+                Origin: endpoint.origin,
             },
             body: JSON.stringify(validBody),
         });
@@ -242,7 +244,11 @@ test("diagnostic persistence stays bounded across concurrent processes", async (
 });
 
 function postDiagnostic(endpoint, body, token) {
-    const headers = { "Content-Type": "application/json" };
+    const headers = {
+        "Content-Type": "application/json",
+        "Sec-Fetch-Site": "same-origin",
+        Origin: endpoint.origin,
+    };
     if (token) headers["X-SkimDown-Capability"] = token;
     return fetch(endpoint, {
         method: "POST",

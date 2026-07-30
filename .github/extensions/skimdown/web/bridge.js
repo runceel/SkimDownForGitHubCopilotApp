@@ -40,6 +40,14 @@
     var lastReady = null;
     var errors = [];
 
+    function capabilityToken() {
+        try {
+            return new URLSearchParams(window.parent.location.hash.slice(1)).get("token") || "";
+        } catch (e) {
+            return "";
+        }
+    }
+
     // ---------- diagnostics ----------
 
     function recordError(text) {
@@ -88,17 +96,11 @@
 
     function beacon(reason) {
         try {
-            var token = "";
-            try {
-                token = new URLSearchParams(window.parent.location.hash.slice(1)).get("capability") || "";
-            } catch (e) {
-                // A detached frame cannot report diagnostics.
-            }
             fetch("/api/diag", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    "X-SkimDown-Capability": token,
+                    "X-SkimDown-Capability": capabilityToken(),
                 },
                 body: JSON.stringify(snapshot(reason)),
             }).catch(function () {

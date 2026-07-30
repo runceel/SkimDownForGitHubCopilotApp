@@ -76,8 +76,8 @@ const CONTENT_TYPES = new Map(Object.entries({
 }));
 
 const SSE_KEEPALIVE_MS = 25000;
-const DEFAULT_REQUEST_MAX_BYTES = 8 * 1024 * 1024;
-const CAPABILITY_HEADER = "x-skimdown-capability";
+const CAPABILITY_BYTES = 32;
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 
 /**
  * Create and start the servers plus all state for one canvas instance.
@@ -97,10 +97,14 @@ export async function createInstance(ctx) {
     };
 
     const sseClients = new Set();
-    const diagnosticToken = randomBytes(32).toString("base64url");
     const diagnosticRateLimiter = createDiagnosticRateLimiter();
     /** token -> absolute directory, backing the content origin. */
     const contentDirs = new Map();
+    const approvedRoots = new Set();
+    const capabilityToken = randomBytes(CAPABILITY_BYTES).toString("base64url");
+
+    approveRoot(state.workspacePath);
+    approveRoot(sessionArtifactsDir(ctx.sessionId));
 
     const watcher = createWatcher(() => {
         void handleFilesystemChange();
@@ -123,17 +127,55 @@ export async function createInstance(ctx) {
     const assetServer = createServer((req, res) => {
         void handleAssetRequest(req, res).catch((error) => {
             ctx.log?.(`skimdown request failed: ${error?.message || error}`);
-            endWithStatus(res, 500, "internal error");
+            const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+            if ((req.url || "").startsWith("/api/")) {
+                sendJson(res, status, { error: status === 500 ? "internal error" : error.message });
+            } else {
+                endWithStatus(res, status, status === 500 ? "internal error" : error.message);
+            }
         });
     });
     await listen(assetServer);
     const assetPort = portOf(assetServer);
-    const url = `http://127.0.0.1:${assetPort}/#capability=${encodeURIComponent(diagnosticToken)}`;
+    const assetOrigin = `http://127.0.0.1:${assetPort}`;
+    const url = `${assetOrigin}/#token=${encodeURIComponent(capabilityToken)}`;
 
     // ---------- state helpers ----------
 
+    function approveRoot(root) {
+        if (typeof root !== "string" || root.length === 0) return;
+        approvedRoots.add(canonicalPath(root));
+    }
+
+    function approveListing(listing) {
+        if (listing?.root) approveRoot(listing.root);
+        for (const group of listing?.groups || []) {
+            for (const entry of group.entries || []) {
+                if (entry.path) approveRoot(path.dirname(entry.path));
+            }
+        }
+    }
+
+    function isApprovedPath(candidate) {
+        const resolved = canonicalPath(candidate);
+        for (const root of approvedRoots) {
+            if (isInside(root, resolved)) return true;
+        }
+        return false;
+    }
+
+    function requireApprovedPath(candidate) {
+        if (isApprovedPath(candidate)) return;
+        throw httpError(403, "path is outside the approved roots");
+    }
+
+    function approveTarget(classified) {
+        if (classified.kind === "folder") approveRoot(classified.path);
+        if (classified.kind === "file") approveRoot(path.dirname(classified.path));
+    }
+
     function contentTokenFor(dir) {
-        const resolved = path.resolve(dir);
+        const resolved = canonicalPath(dir);
         const token = createHash("sha256").update(resolved).digest("hex").slice(0, 16);
         contentDirs.set(token, resolved);
         return token;
@@ -145,6 +187,7 @@ export async function createInstance(ctx) {
             state.source,
             state.root,
         );
+        approveListing(state.listing);
         updateWatchTargets();
         if (push) broadcast("state", await buildState());
         return state.listing;
@@ -187,7 +230,8 @@ export async function createInstance(ctx) {
     }
 
     async function selectFile(absPath, { push = true } = {}) {
-        const resolved = path.resolve(absPath);
+        const resolved = canonicalPath(absPath);
+        requireApprovedPath(resolved);
         const file = await readMarkdownFile(resolved);
         const dir = path.dirname(resolved);
         const token = contentTokenFor(dir);
@@ -283,14 +327,18 @@ export async function createInstance(ctx) {
     }
 
     async function setSource(source, rootPath) {
-        state.source = source;
+        let nextRoot = state.root;
         if (source === SOURCE_WORKSPACE) {
-            state.root = state.workspacePath;
-        } else if (source === SOURCE_PATH) {
-            state.root = rootPath ? path.resolve(rootPath) : state.root;
-        } else {
-            state.root = null;
+            nextRoot = state.workspacePath;
+        } else if (source === SOURCE_PATH && rootPath) {
+            nextRoot = path.resolve(rootPath);
+            requireApprovedPath(nextRoot);
+        } else if (source !== SOURCE_PATH) {
+            nextRoot = null;
         }
+
+        state.source = source;
+        state.root = nextRoot;
         state.notice = null;
         await updateSettings({ lastSource: source });
         await refreshListing();
@@ -300,8 +348,12 @@ export async function createInstance(ctx) {
         else broadcast("empty", {});
     }
 
-    async function openTarget(target) {
+    async function openTarget(target, { approve = false } = {}) {
         const classified = await classifyPath(target, state.workspacePath);
+        if (classified.kind === "folder" || classified.kind === "file") {
+            if (approve) approveTarget(classified);
+            else requireApprovedPath(classified.path);
+        }
         if (classified.kind === "folder") {
             state.source = SOURCE_PATH;
             state.root = classified.path;
@@ -382,10 +434,22 @@ export async function createInstance(ctx) {
     // ---------- HTTP: asset origin ----------
 
     async function handleAssetRequest(req, res) {
-        const parsed = new URL(req.url || "/", "http://127.0.0.1");
-        const pathname = decodeURIComponent(parsed.pathname);
+        if (!hasExpectedHost(req, assetPort)) return endWithStatus(res, 403, "invalid host");
 
-        if (pathname === "/events") return handleSse(res);
+        let parsed;
+        let pathname;
+        try {
+            parsed = new URL(req.url || "/", assetOrigin);
+            pathname = decodeURIComponent(parsed.pathname);
+        } catch {
+            return endWithStatus(res, 400, "invalid request target");
+        }
+
+        if (pathname === "/events") {
+            const rejection = validateProtectedRequest(req, parsed, assetOrigin, capabilityToken, true);
+            if (rejection) return sendJson(res, rejection.status, { error: rejection.message });
+            return handleSse(res);
+        }
         if (pathname.startsWith("/api/")) return handleApi(req, res, pathname, parsed);
         return handleStatic(res, pathname);
     }
@@ -428,19 +492,19 @@ export async function createInstance(ctx) {
     }
 
     async function handleApi(req, res, pathname, parsed) {
+        const rejection = validateProtectedRequest(req, parsed, assetOrigin, capabilityToken, false);
+        if (rejection) return sendJson(res, rejection.status, { error: rejection.message });
+
         if (req.method === "GET" && pathname === "/api/state") {
             return sendJson(res, 200, await buildState());
         }
 
-        if (req.method !== "POST") return endWithStatus(res, 405, "method not allowed");
+        if (req.method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
+        if (!isJsonContentType(req.headers["content-type"])) {
+            return sendJson(res, 415, { error: "application/json is required" });
+        }
 
         if (pathname === "/api/diag") {
-            if (!hasCapability(req, diagnosticToken)) {
-                return sendJson(res, 401, { error: "unauthorized" });
-            }
-            if (!isJsonRequest(req)) {
-                return sendJson(res, 415, { error: "content type must be application/json" });
-            }
             const rate = diagnosticRateLimiter.take();
             if (!rate.allowed) {
                 return sendJson(
@@ -452,18 +516,10 @@ export async function createInstance(ctx) {
             }
         }
 
-        let body;
-        try {
-            body = await readJsonBody(
-                req,
-                pathname === "/api/diag" ? DIAG_REQUEST_MAX_BYTES : DEFAULT_REQUEST_MAX_BYTES,
-            );
-        } catch (error) {
-            if (error instanceof RequestBodyError) {
-                return sendJson(res, error.status, { error: error.message });
-            }
-            throw error;
-        }
+        const body = await readJsonBody(
+            req,
+            pathname === "/api/diag" ? DIAG_REQUEST_MAX_BYTES : MAX_REQUEST_BYTES,
+        );
 
         switch (pathname) {
             case "/api/select": {
@@ -482,7 +538,7 @@ export async function createInstance(ctx) {
                 return sendJson(res, 200, { ok: true });
             }
             case "/api/open": {
-                const result = await openTarget(String(body.path || ""));
+                const result = await openTarget(String(body.path || ""), { approve: true });
                 return sendJson(res, 200, { ok: true, ...result });
             }
             case "/api/refresh": {
@@ -564,6 +620,7 @@ export async function createInstance(ctx) {
         } catch {
             target = path.resolve(baseDir, rawPath);
         }
+        if (!isApprovedPath(target)) return { kind: "forbidden" };
 
         const classified = await classifyPath(target);
         if (classified.kind === "file") return { kind: "markdown", path: classified.path };
@@ -594,6 +651,8 @@ export async function createInstance(ctx) {
         res.writeHead(200, {
             "Content-Type": type,
             "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
         });
         res.end(data);
     }
@@ -601,6 +660,7 @@ export async function createInstance(ctx) {
     // ---------- HTTP: content origin ----------
 
     async function handleContentRequest(req, res) {
+        if (!hasExpectedHost(req, contentPort)) return endWithStatus(res, 403, "invalid host");
         if (req.method !== "GET" && req.method !== "HEAD") {
             return endWithStatus(res, 405, "method not allowed");
         }
@@ -611,7 +671,13 @@ export async function createInstance(ctx) {
         const dir = contentDirs.get(segments[1]);
         if (!dir) return endWithStatus(res, 404, "not found");
 
-        const resolved = path.resolve(dir, ...segments.slice(2));
+        const candidate = path.resolve(dir, ...segments.slice(2));
+        let resolved;
+        try {
+            resolved = await fsp.realpath(candidate);
+        } catch {
+            return endWithStatus(res, 404, "not found");
+        }
         if (!isInside(dir, resolved)) return endWithStatus(res, 403, "forbidden");
 
         const type = CONTENT_TYPES.get(path.extname(resolved).toLowerCase());
@@ -656,6 +722,7 @@ export async function createInstance(ctx) {
     if (state.source === SOURCE_PATH) {
         const registry = await loadRegistry(ctx.sessionId);
         state.root = registry.lastRoot || state.workspacePath;
+        approveRoot(state.root);
         if (!state.root) state.source = SOURCE_SESSION;
     }
     await refreshListing();
@@ -746,50 +813,83 @@ function openExternal(href) {
     }
 }
 
-class RequestBodyError extends Error {
-    constructor(status, message) {
-        super(message);
-        this.status = status;
-    }
-}
-
 async function readJsonBody(req, maxBytes) {
     const declaredLength = Number(req.headers["content-length"]);
     if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-        throw new RequestBodyError(413, "request body too large");
+        throw httpError(413, "request body too large");
     }
 
     const chunks = [];
     let size = 0;
     for await (const chunk of req) {
         size += chunk.length;
-        if (size > maxBytes) throw new RequestBodyError(413, "request body too large");
+        if (size > maxBytes) throw httpError(413, "request body too large");
         chunks.push(chunk);
     }
-    if (chunks.length === 0) return {};
+    if (chunks.length === 0) throw httpError(400, "JSON body is required");
     let parsed;
     try {
         parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     } catch {
-        throw new RequestBodyError(400, "request body must be valid JSON");
+        throw httpError(400, "invalid JSON body");
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new RequestBodyError(400, "request body must be a JSON object");
+        throw httpError(400, "JSON body must be an object");
     }
     return parsed;
 }
 
-function isJsonRequest(req) {
-    const contentType = req.headers["content-type"];
-    return typeof contentType === "string" && /^application\/json(?:\s*;|$)/i.test(contentType);
+function canonicalPath(value) {
+    const resolved = path.resolve(value);
+    try {
+        return fs.realpathSync.native(resolved);
+    } catch {
+        return resolved;
+    }
 }
 
-function hasCapability(req, expected) {
-    const actual = req.headers[CAPABILITY_HEADER];
-    if (typeof actual !== "string") return false;
-    const actualBuffer = Buffer.from(actual, "utf8");
-    const expectedBuffer = Buffer.from(expected, "utf8");
-    return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+function hasExpectedHost(req, port) {
+    return req.headers.host === `127.0.0.1:${port}`;
+}
+
+function validateProtectedRequest(req, parsed, expectedOrigin, capabilityToken, sse) {
+    const suppliedToken = sse
+        ? parsed.searchParams.get("token")
+        : singleHeader(req.headers["x-skimdown-capability"]);
+    if (!safeTokenEqual(suppliedToken, capabilityToken)) {
+        return { status: 401, message: "invalid capability" };
+    }
+
+    if (singleHeader(req.headers["sec-fetch-site"]) !== "same-origin") {
+        return { status: 403, message: "cross-site request denied" };
+    }
+
+    const origin = singleHeader(req.headers.origin);
+    const originRequired = sse || req.method !== "GET";
+    if ((originRequired && !origin) || (origin && origin !== expectedOrigin)) {
+        return { status: 403, message: "invalid origin" };
+    }
+    return null;
+}
+
+function singleHeader(value) {
+    return Array.isArray(value) ? value[0] : value;
+}
+
+function safeTokenEqual(left, right) {
+    if (typeof left !== "string" || typeof right !== "string") return false;
+    const leftBytes = Buffer.from(left);
+    const rightBytes = Buffer.from(right);
+    return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+}
+
+function isJsonContentType(value) {
+    if (typeof value !== "string") return false;
+    return value.split(";", 1)[0].trim().toLowerCase() === "application/json";
+}
+
+function httpError(statusCode, message) {
+    return Object.assign(new Error(message), { statusCode });
 }
 
 function sendJson(res, status, payload, headers = {}) {
