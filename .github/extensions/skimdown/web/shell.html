@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -29,51 +29,51 @@
     </svg>
 
     <div id="app">
-        <aside id="sidebar" aria-label="Markdown ファイル一覧">
+        <aside id="sidebar" aria-label="Markdown files">
             <div class="sidebar-head">
                 <div class="sidebar-row">
-                    <label class="sr-only" for="source-select">ソース</label>
+                    <label class="sr-only" for="source-select">Source</label>
                     <select id="source-select"></select>
-                    <button type="button" class="icon-button" id="btn-open-path" title="パスを開く (Ctrl+O)" aria-label="パスを開く">
+                    <button type="button" class="icon-button" id="btn-open-path" title="Open path (Ctrl+O)" aria-label="Open path">
                         <svg aria-hidden="true"><use href="#i-folder-open" /></svg>
                     </button>
-                    <button type="button" class="icon-button" id="btn-refresh" title="再読み込み" aria-label="再読み込み">
+                    <button type="button" class="icon-button" id="btn-refresh" title="Refresh" aria-label="Refresh">
                         <svg aria-hidden="true"><use href="#i-refresh" /></svg>
                     </button>
                 </div>
                 <div class="sidebar-row" id="view-modes">
-                    <button type="button" class="icon-button" id="btn-view-tree" title="フォルダーツリー" aria-pressed="false">
+                    <button type="button" class="icon-button" id="btn-view-tree" title="Folder tree" aria-pressed="false">
                         <svg aria-hidden="true"><use href="#i-tree" /></svg>
                     </button>
-                    <button type="button" class="icon-button" id="btn-view-recent" title="更新日時順" aria-pressed="false">
+                    <button type="button" class="icon-button" id="btn-view-recent" title="Recently updated" aria-pressed="false">
                         <svg aria-hidden="true"><use href="#i-clock" /></svg>
                     </button>
-                    <label class="sr-only" for="filter">絞り込み</label>
-                    <input type="search" id="filter" placeholder="絞り込み" autocomplete="off" />
+                    <label class="sr-only" for="filter">Filter</label>
+                    <input type="search" id="filter" placeholder="Filter" autocomplete="off" />
                 </div>
             </div>
             <div id="tree" role="tree" tabindex="-1"></div>
             <div class="sidebar-foot">
                 <span id="count"></span>
                 <span class="sidebar-foot-actions">
-                    <button type="button" class="icon-button" id="btn-privacy" title="プライバシーと履歴" aria-label="プライバシーと履歴">
+                    <button type="button" class="icon-button" id="btn-privacy" title="Privacy and history" aria-label="Privacy and history">
                         <svg aria-hidden="true"><use href="#i-shield" /></svg>
                     </button>
-                    <button type="button" class="icon-button" id="btn-swap-sidebar" title="サイドバーを左右入れ替え" aria-label="サイドバーを左右入れ替え">
+                    <button type="button" class="icon-button" id="btn-swap-sidebar" title="Move sidebar to the other side" aria-label="Move sidebar to the other side">
                         <svg aria-hidden="true"><use href="#i-swap" /></svg>
                     </button>
                 </span>
             </div>
         </aside>
 
-        <div id="resizer" role="separator" aria-orientation="vertical" aria-label="サイドバーの幅"></div>
+        <div id="resizer" role="separator" aria-orientation="vertical" aria-label="Sidebar width"></div>
 
         <main id="main">
             <header id="toolbar">
-                <button type="button" class="icon-button" id="btn-toggle-sidebar" title="サイドバーの表示切替 (Ctrl+B)" aria-label="サイドバーの表示切替">
+                <button type="button" class="icon-button" id="btn-toggle-sidebar" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar">
                     <svg aria-hidden="true"><use href="#i-sidebar" /></svg>
                 </button>
-                <button type="button" class="icon-button" id="btn-toggle-toc" title="目次を非表示" aria-label="目次の表示切替" aria-pressed="true">
+                <button type="button" class="icon-button" id="btn-toggle-toc" title="Hide table of contents" aria-label="Toggle table of contents" aria-pressed="true">
                     <svg aria-hidden="true"><use href="#i-toc" /></svg>
                 </button>
                 <div id="title-box">
@@ -81,91 +81,91 @@
                     <div id="doc-subtitle"></div>
                 </div>
                 <div class="toolbar-actions">
-                    <button type="button" class="icon-button" id="btn-open-browser" title="既定のブラウザーで開く" aria-label="既定のブラウザーで開く">
+                    <button type="button" class="icon-button" id="btn-open-browser" title="Open in default browser" aria-label="Open in default browser">
                         <svg aria-hidden="true"><use href="#i-external" /></svg>
                     </button>
-                    <button type="button" class="icon-button" id="btn-find" title="このファイル内を検索 (Ctrl+F)" aria-label="検索">
+                    <button type="button" class="icon-button" id="btn-find" title="Find in this file (Ctrl+F)" aria-label="Find">
                         <svg aria-hidden="true"><use href="#i-search" /></svg>
                     </button>
-                    <button type="button" class="icon-button" id="btn-zoom-out" title="縮小 (Ctrl+-)" aria-label="縮小">
+                    <button type="button" class="icon-button" id="btn-zoom-out" title="Zoom out (Ctrl+-)" aria-label="Zoom out">
                         <svg aria-hidden="true"><use href="#i-zoom-out" /></svg>
                     </button>
-                    <button type="button" class="icon-button" id="btn-zoom-reset" title="ズームをリセット (Ctrl+0)">100%</button>
-                    <button type="button" class="icon-button" id="btn-zoom-in" title="拡大 (Ctrl++)" aria-label="拡大">
+                    <button type="button" class="icon-button" id="btn-zoom-reset" title="Reset zoom (Ctrl+0)">100%</button>
+                    <button type="button" class="icon-button" id="btn-zoom-in" title="Zoom in (Ctrl++)" aria-label="Zoom in">
                         <svg aria-hidden="true"><use href="#i-zoom-in" /></svg>
                     </button>
-                    <button type="button" class="icon-button" id="btn-width" title="本文の最大幅を切替 (Ctrl+] / Ctrl+[)" aria-label="本文の最大幅を切替">
+                    <button type="button" class="icon-button" id="btn-width" title="Change maximum content width (Ctrl+] / Ctrl+[)" aria-label="Change maximum content width">
                         <svg aria-hidden="true"><use href="#i-width" /></svg>
                     </button>
                 </div>
             </header>
 
             <div class="bar" id="findbar" hidden>
-                <label class="sr-only" for="find-input">このファイル内を検索</label>
-                <input type="search" id="find-input" placeholder="このファイル内を検索" autocomplete="off" />
-                <button type="button" class="icon-button" id="btn-find-case" title="大文字と小文字を区別" aria-pressed="false">Aa</button>
+                <label class="sr-only" for="find-input">Find in this file</label>
+                <input type="search" id="find-input" placeholder="Find in this file" autocomplete="off" />
+                <button type="button" class="icon-button" id="btn-find-case" title="Match case" aria-pressed="false">Aa</button>
                 <span class="count" id="find-count"></span>
-                <button type="button" class="icon-button" id="btn-find-prev" title="前を検索 (Ctrl+Shift+G)" aria-label="前を検索">
+                <button type="button" class="icon-button" id="btn-find-prev" title="Find previous (Ctrl+Shift+G)" aria-label="Find previous">
                     <svg aria-hidden="true"><use href="#i-up" /></svg>
                 </button>
-                <button type="button" class="icon-button" id="btn-find-next" title="次を検索 (Ctrl+G)" aria-label="次を検索">
+                <button type="button" class="icon-button" id="btn-find-next" title="Find next (Ctrl+G)" aria-label="Find next">
                     <svg aria-hidden="true"><use href="#i-down" /></svg>
                 </button>
-                <button type="button" class="icon-button" id="btn-find-close" title="検索を閉じる" aria-label="検索を閉じる">
+                <button type="button" class="icon-button" id="btn-find-close" title="Close search" aria-label="Close search">
                     <svg aria-hidden="true"><use href="#i-close" /></svg>
                 </button>
             </div>
 
             <div class="bar" id="pathbar" hidden>
-                <label class="sr-only" for="path-input">開くパス</label>
-                <input type="text" id="path-input" placeholder="開くフォルダー、または .md ファイルのパス" autocomplete="off" spellcheck="false" />
-                <button type="button" class="text-button" id="btn-path-open">開く</button>
-                <button type="button" class="icon-button" id="btn-path-cancel" title="閉じる" aria-label="閉じる">
+                <label class="sr-only" for="path-input">Path to open</label>
+                <input type="text" id="path-input" placeholder="Path to a folder or .md file" autocomplete="off" spellcheck="false" />
+                <button type="button" class="text-button" id="btn-path-open">Open</button>
+                <button type="button" class="icon-button" id="btn-path-cancel" title="Close" aria-label="Close">
                     <svg aria-hidden="true"><use href="#i-close" /></svg>
                 </button>
             </div>
 
             <div class="bar" id="linkbar" hidden>
                 <span class="grow-text" id="link-text"></span>
-                <button type="button" class="text-button" id="btn-link-open">外部で開く</button>
-                <button type="button" class="icon-button" id="btn-link-cancel" title="閉じる" aria-label="閉じる">
+                <button type="button" class="text-button" id="btn-link-open">Open externally</button>
+                <button type="button" class="icon-button" id="btn-link-cancel" title="Close" aria-label="Close">
                     <svg aria-hidden="true"><use href="#i-close" /></svg>
                 </button>
             </div>
 
             <div class="bar privacy-bar" id="remotebar" hidden>
                 <span class="grow-text" id="remote-text"></span>
-                <button type="button" class="text-button" id="btn-remote-load">この文書で読み込む</button>
+                <button type="button" class="text-button" id="btn-remote-load">Load for this document</button>
             </div>
 
             <div class="bar" id="deadbar" hidden>
-                <span class="grow-text" id="deadbar-text">接続が切れました。拡張機能の再読み込みなどでこのパネルは更新されません。</span>
-                <button type="button" class="text-button" id="btn-dead-reload">再読み込み</button>
+                <span class="grow-text" id="deadbar-text">Disconnected. This panel will not update after the extension reloads.</span>
+                <button type="button" class="text-button" id="btn-dead-reload">Reload</button>
             </div>
 
             <div id="preview-wrap">
                 <iframe
                     id="preview"
-                    title="Markdown プレビュー"
+                    title="Markdown preview"
                     sandbox="allow-scripts allow-same-origin"
                     referrerpolicy="no-referrer"></iframe>
-                <div id="empty-state" hidden>Markdown が選択されていません。</div>
+                <div id="empty-state" hidden>No Markdown selected.</div>
                 <button
                     type="button"
                     id="btn-expand-toc"
-                    aria-label="目次を開く"
+                    aria-label="Open table of contents"
                     aria-controls="toc-pane"
                     aria-expanded="false"
-                    title="目次を開く"
+                    title="Open table of contents"
                     hidden>
                     <svg aria-hidden="true"><use href="#i-toc" /></svg>
                 </button>
-                <aside id="toc-pane" aria-label="目次" hidden>
+                <aside id="toc-pane" aria-label="Table of contents" hidden>
                     <header id="toc-header">
                         <span>Contents</span>
-                        <button type="button" id="btn-close-toc" aria-label="目次を非表示" title="目次を非表示">&times;</button>
+                        <button type="button" id="btn-close-toc" aria-label="Hide table of contents" title="Hide table of contents">&times;</button>
                     </header>
-                    <nav id="toc-list" aria-label="文書の見出し"></nav>
+                    <nav id="toc-list" aria-label="Document headings"></nav>
                     <p id="toc-empty">No headings</p>
                 </aside>
             </div>
@@ -176,38 +176,38 @@
 
     <dialog id="privacy-dialog" aria-labelledby="privacy-title">
         <div class="dialog-head">
-            <h2 id="privacy-title">プライバシーとセッション履歴</h2>
-            <button type="button" class="icon-button" id="btn-privacy-close" title="閉じる" aria-label="閉じる">
+            <h2 id="privacy-title">Privacy and session history</h2>
+            <button type="button" class="icon-button" id="btn-privacy-close" title="Close" aria-label="Close">
                 <svg aria-hidden="true"><use href="#i-close" /></svg>
             </button>
         </div>
         <div class="dialog-body">
             <label class="setting-row">
                 <span>
-                    <strong>セッション履歴を端末に保存</strong>
-                    <small>既定では保存しません。表示中はメモリ内だけで保持します。</small>
+                    <strong>Save session history to this device</strong>
+                    <small>Off by default. While open, history is kept only in memory.</small>
                 </span>
                 <input type="checkbox" id="persist-session-history" />
             </label>
             <label class="setting-row">
                 <span>
-                    <strong>保持期間</strong>
-                    <small>期限を過ぎた履歴は起動時に自動削除します。</small>
+                    <strong>Retention period</strong>
+                    <small>Expired history is automatically deleted on startup.</small>
                 </span>
                 <select id="session-retention-days">
-                    <option value="1">1 日</option>
-                    <option value="7">7 日</option>
-                    <option value="30">30 日</option>
+                    <option value="1">1 day</option>
+                    <option value="7">7 days</option>
+                    <option value="30">30 days</option>
                 </select>
             </label>
             <p class="privacy-note">
-                保存対象はインライン Markdown 本文（最大 50 件、各 2 MB）、編集した Markdown のパス、
-                最後の選択です。保存先は
-                <code>$COPILOT_HOME/extensions/skimdown/artifacts/sessions/</code> です。
+                Saved data includes inline Markdown content (up to 50 items, 2 MB each), paths to
+                edited Markdown files, and the last selection. It is stored in
+                <code>$COPILOT_HOME/extensions/skimdown/artifacts/sessions/</code>.
             </p>
             <div class="danger-zone">
-                <button type="button" class="text-button danger-button" id="btn-clear-current-history">このセッションの履歴を消去</button>
-                <button type="button" class="text-button danger-button" id="btn-clear-all-history">保存済み履歴をすべて消去</button>
+                <button type="button" class="text-button danger-button" id="btn-clear-current-history">Clear this session's history</button>
+                <button type="button" class="text-button danger-button" id="btn-clear-all-history">Clear all saved history</button>
             </div>
         </div>
     </dialog>

@@ -17,26 +17,26 @@ export class RemoteContentError extends Error {
 
 export function validateRemoteUrl(rawUrl) {
     if (typeof rawUrl !== "string" || rawUrl.length === 0 || rawUrl.length > 4096) {
-        throw new RemoteContentError("無効なリモート URL です");
+        throw new RemoteContentError("Invalid remote URL");
     }
 
     let url;
     try {
         url = new URL(rawUrl);
     } catch {
-        throw new RemoteContentError("無効なリモート URL です");
+        throw new RemoteContentError("Invalid remote URL");
     }
 
     if (url.protocol !== "http:" && url.protocol !== "https:") {
-        throw new RemoteContentError("http/https のリモートコンテンツだけを読み込めます");
+        throw new RemoteContentError("Only remote content over http/https can be loaded");
     }
     if (url.username || url.password) {
-        throw new RemoteContentError("認証情報を含む URL は読み込めません");
+        throw new RemoteContentError("URLs containing credentials cannot be loaded");
     }
 
     const hostname = normalizedHostname(url.hostname);
     if (isLocalHostname(hostname)) {
-        throw new RemoteContentError("ローカルまたはプライベートネットワークの URL は読み込めません", 403);
+        throw new RemoteContentError("Local or private network URLs cannot be loaded", 403);
     }
 
     url.hash = "";
@@ -58,11 +58,11 @@ export async function resolvePublicTarget(url, lookup = dns.lookup) {
         : await lookup(hostname, { all: true, verbatim: true });
 
     if (!Array.isArray(addresses) || addresses.length === 0) {
-        throw new RemoteContentError("リモートホストを解決できません", 502);
+        throw new RemoteContentError("Could not resolve the remote host", 502);
     }
     if (addresses.some((entry) => !isPublicAddress(entry.address))) {
         throw new RemoteContentError(
-            "ループバック、link-local、プライベート IP への接続は許可されていません",
+            "Connections to loopback, link-local, and private IP addresses are not allowed",
             403,
         );
     }
@@ -85,7 +85,7 @@ async function fetchFollowingRedirects(rawUrl, options, redirectCount) {
     if (isRedirect(response.statusCode) && response.headers.location) {
         response.resume();
         if (redirectCount >= MAX_REDIRECTS) {
-            throw new RemoteContentError("リダイレクトが多すぎます", 502);
+            throw new RemoteContentError("Too many redirects", 502);
         }
         const next = new URL(response.headers.location, url);
         return fetchFollowingRedirects(next.toString(), options, redirectCount + 1);
@@ -93,19 +93,19 @@ async function fetchFollowingRedirects(rawUrl, options, redirectCount) {
 
     if (response.statusCode !== 200) {
         response.resume();
-        throw new RemoteContentError(`リモートサーバーが HTTP ${response.statusCode} を返しました`, 502);
+        throw new RemoteContentError(`The remote server returned HTTP ${response.statusCode}`, 502);
     }
 
     const contentType = normalizeContentType(response.headers["content-type"]);
     if (!isAllowedMediaType(contentType)) {
         response.resume();
-        throw new RemoteContentError("画像またはメディアではない応答は読み込めません", 415);
+        throw new RemoteContentError("Responses that are not images or media cannot be loaded", 415);
     }
 
     const declaredLength = Number.parseInt(response.headers["content-length"] || "", 10);
     if (Number.isFinite(declaredLength) && declaredLength > options.maxBytes) {
         response.resume();
-        throw new RemoteContentError("リモートコンテンツが大きすぎます", 413);
+        throw new RemoteContentError("Remote content is too large", 413);
     }
 
     const chunks = [];
@@ -114,7 +114,7 @@ async function fetchFollowingRedirects(rawUrl, options, redirectCount) {
         size += chunk.length;
         if (size > options.maxBytes) {
             response.destroy();
-            throw new RemoteContentError("リモートコンテンツが大きすぎます", 413);
+            throw new RemoteContentError("Remote content is too large", 413);
         }
         chunks.push(chunk);
     }
@@ -147,13 +147,13 @@ function requestOnce(url, target, timeoutMs) {
             resolve,
         );
         req.setTimeout(timeoutMs, () => {
-            req.destroy(new RemoteContentError("リモートコンテンツの読み込みがタイムアウトしました", 504));
+            req.destroy(new RemoteContentError("Loading remote content timed out", 504));
         });
         req.once("error", (error) => {
             reject(
                 error instanceof RemoteContentError
                     ? error
-                    : new RemoteContentError(`リモートコンテンツを読み込めません: ${error.message}`, 502),
+                    : new RemoteContentError(`Could not load remote content: ${error.message}`, 502),
             );
         });
         req.end();

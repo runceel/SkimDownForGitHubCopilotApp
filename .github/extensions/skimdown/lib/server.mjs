@@ -317,7 +317,7 @@ export async function createInstance(ctx) {
 
     function grantRemoteContent(documentId) {
         if (!state.doc || documentId !== state.doc.remoteContentId) {
-            throw new RemoteContentError("表示中の文書が変わりました。もう一度操作してください", 409);
+            throw new RemoteContentError("The displayed document changed. Try again.", 409);
         }
 
         let token = remoteContentGrants.get(documentId);
@@ -384,7 +384,7 @@ export async function createInstance(ctx) {
                 kind: "inline",
                 id: doc.id,
                 title: doc.title,
-                subtitle: "エージェントが表示した Markdown",
+                subtitle: "Markdown displayed by the agent",
             };
             state.doc = setRemoteContentIdentity({
                 kind: "inline",
@@ -493,10 +493,10 @@ export async function createInstance(ctx) {
 
         const reason =
             classified.kind === "missing"
-                ? `パスが見つかりません: ${classified.path}`
+                ? `Path not found: ${classified.path}`
                 : classified.kind === "unsupported"
-                  ? `Markdown ではありません: ${classified.path}`
-                  : classified.reason || "無効なパスです";
+                  ? `Not a Markdown file: ${classified.path}`
+                  : classified.reason || "Invalid path";
         const error = new Error(reason);
         error.code = classified.kind === "missing" ? "not_found" : "invalid_path";
         throw error;
@@ -690,7 +690,7 @@ export async function createInstance(ctx) {
                     grantRemoteContent(String(body.documentId || ""));
                 } catch (error) {
                     const status = error instanceof RemoteContentError ? error.status : 400;
-                    return sendJson(res, status, { error: error?.message || "許可できませんでした" });
+                    return sendJson(res, status, { error: error?.message || "Could not grant permission" });
                 }
                 const doc = publicDoc();
                 return sendJson(res, 200, { ok: true, doc });
@@ -1051,7 +1051,7 @@ function applySecurityHeaders(res, { csp, corp }) {
 }
 
 function openExternal(href) {
-    if (!/^https?:\/\//i.test(href)) return { ok: false, error: "http/https のみ開けます" };
+    if (!/^https?:\/\//i.test(href)) return { ok: false, error: "Only http/https URLs can be opened" };
     try {
         // Deliberately avoids cmd.exe so URL metacharacters can never be
         // interpreted as shell syntax.

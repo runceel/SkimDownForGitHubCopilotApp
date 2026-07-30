@@ -107,7 +107,7 @@ function titleFor(instance) {
 function statusFor(instance) {
     const listing = instance.state.listing;
     if (!listing) return "";
-    return `${listing.rootLabel} · ${listing.count} 件`;
+    return `${listing.rootLabel} · ${listing.count} ${listing.count === 1 ? "item" : "items"}`;
 }
 
 const canvas = createCanvas({
