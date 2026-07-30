@@ -85,7 +85,7 @@ async function openCanvas(ctx) {
         await instance.setSource(SOURCE_SESSION);
         await instance.showInline(doc.id);
     } else if (typeof input.path === "string" && input.path.trim().length > 0) {
-        await instance.openTarget(input.path);
+        await instance.openTarget(input.path, { approve: true });
     } else if (typeof input.source === "string") {
         await instance.setSource(input.source);
     }
@@ -190,7 +190,7 @@ const canvas = createCanvas({
             handler: async (ctx) => {
                 const instance = await getInstance(ctx.instanceId);
                 try {
-                    return await instance.openTarget(String(ctx.input?.path ?? ""));
+                    return await instance.openTarget(String(ctx.input?.path ?? ""), { approve: true });
                 } catch (error) {
                     throw new CanvasError(error?.code || "open_failed", error?.message || String(error));
                 }
