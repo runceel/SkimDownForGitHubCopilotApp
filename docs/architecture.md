@@ -28,10 +28,13 @@ flowchart TB
     provider["拡張プロバイダ"]
     state["ユーザー・セッション状態<br/>COPILOT_HOME 配下"]
 
-    subgraph asset["信頼されたアセット origin（loopback）"]
+    subgraph asset["信頼されたシェル origin（loopback）"]
         shell["シェル<br/>ナビゲーション・テーマ・障害表示"]
-        renderer["入れ子 renderer frame<br/>上流レンダリング資産"]
         api["HTTP API / SSE"]
+    end
+
+    subgraph render["renderer origin（別 loopback）"]
+        renderer["sandboxed renderer frame<br/>上流レンダリング資産"]
     end
 
     subgraph content["コンテンツ origin（別 loopback）"]
@@ -41,9 +44,9 @@ flowchart TB
     host --> provider
     provider --> asset
     provider <--> state
-    shell <--> renderer
+    shell <-->|"検証済み postMessage"| renderer
     shell <--> api
-    renderer -. "診断" .-> api
+    renderer -. "診断" .-> shell
     renderer --> media
 ```
 
@@ -52,7 +55,7 @@ flowchart TB
 | コンポーネント | 責務 | 境界 |
 | --- | --- | --- |
 | 拡張プロバイダ | canvas の登録、インスタンスのライフサイクル、ホストからのアクション受付 | UI の描画や Markdown の解釈を持たない |
-| ローカル HTTP サーバー層 | UI 資産、状態操作、イベント配信、ローカルメディアの限定配信 | loopback 外へ公開しない。アセットとコンテンツを同じ origin にしない |
+| ローカル HTTP サーバー層 | UI 資産、renderer 資産、状態操作、イベント配信、ローカルメディアの限定配信 | loopback 外へ公開しない。シェル、renderer、コンテンツを同じ origin にしない |
 | シェル | ナビゲーション、ツールバー、ホストテーマの取り込み、サーバーと renderer の仲介、障害表示 | Markdown のレンダリング規則を持たない |
 | renderer frame | 上流 SkimDown と同じレンダリング処理で、信頼できない Markdown を安全な表示へ変換する | シェルの UI や永続化を持たない |
 | ホスト互換シム | 上流 renderer が期待するホスト契約を canvas 環境へ適合させる | 上流 renderer を変更して差異を吸収しない |
@@ -60,20 +63,25 @@ flowchart TB
 
 ## 信頼境界と origin
 
-1 つの canvas インスタンスは、異なるポートを持つ 2 つの loopback origin を使う。
+1 つの canvas インスタンスは、異なるポートを持つ 3 つの loopback origin を使う。
 
-- **アセット origin** は、拡張が管理するシェル、renderer、ベンダー資産、状態 API、
-  イベントストリームを提供する。ここは信頼されたアプリケーションコードの領域である。
+- **シェル origin** は、拡張が管理するシェル、状態 API、イベントストリームだけを提供する。
+  ここは信頼されたアプリケーションコードと状態操作の領域であり、API とイベントストリームは
+  インスタンス固有の capability を持つ同一 origin の要求だけを受け付ける。
+- **renderer origin** は、renderer とベンダー資産だけを提供し、状態 API とシェル資産を
+  提供しない。
 - **コンテンツ origin** は、開いている文書から参照されるローカルメディアだけを提供する。
   配信対象は許可されたメディア種別かつ選択文書のディレクトリ配下に閉じ込める。
 
-シェルと renderer frame は同一 origin である。入れ子 frame は責務と互換性の境界であり、
-ブラウザー上のセキュリティ境界ではない。同一 origin は、両者が現在状態を直接確認できる
-可用性上の前提でもある。
+renderer frame はシェルと異なる origin に置き、sandbox 化する。シェルとの直接 DOM・
+JavaScript アクセスを許可せず、許可したメッセージ契約だけを境界越しに通す。
 
 renderer のコードは信頼された上流資産だが、入力される Markdown は信頼しない。
 Markdown 由来の HTML は renderer のサニタイズ処理を経由し、ローカルメディアは
-特権を持つアセット origin から配信しない。この区別を崩してはならない。
+特権を持つシェル origin から配信しない。各 origin は役割別 CSP を HTTP header で配信し、
+renderer からシェル API と未許可の外部資源へ接続できないようにする。
+サニタイズは inert な DOM 上で完了させ、URL 解決を含む後処理にも未サニタイズの node を
+渡さない。サニタイザーを利用できない場合は、Markdown を表示せず fail closed とする。
 
 ## ライフサイクル
 
@@ -104,9 +112,11 @@ canvas の `open()` は、初回にインスタンス固有の実行時資源を
 - **canvas host と拡張プロバイダ**は、canvas の open、close、action 契約で通信する。
 - **canvas UI と拡張プロセス**は、loopback HTTP で操作し、SSE で状態と文書の変更を受け取る。
   要求と継続的な更新を分離することで、ファイル変更や別経路の action を同じ表示へ反映する。
-- **シェルと renderer**は、同一 origin の直接問い合わせを主経路とする。通知を 1 回
-  受信できたかどうかではなく、現在の準備状態を問い合わせて合意する。`postMessage` は、
-  直接ハンドルを利用できない場合のフォールバックとして残す。
+  インスタンス capability、loopback Host、Origin、Fetch Metadata をすべて検証し、状態変更は
+  JSON 要求に限定する。capability はインスタンスと同じ寿命を持ち、永続化しない。
+- **シェルと renderer**は、送信元 window、origin、封筒、メッセージ種別を検証する
+  `postMessage` だけで通信する。通知を 1 回受信できたかではなく、シェルが準備状態を
+  再問い合わせし、renderer が現在状態で応答して合意する。
 
 renderer への配送は非同期性を保ち、上流ホスト契約と同じ順序・再入特性を維持する。
 通信経路を変更するときは、上流互換性と再接続時の可用性を同時に評価する。
@@ -139,30 +149,44 @@ renderer への配送は非同期性を保ち、上流ホスト契約と同じ�
 renderer frame の実行状態は、拡張プロセスから直接観察できない。一方、拡張の通常ログは
 ephemeral であり、再接続後の調査には残らない。
 
-そのため、renderer とシェルが起動初期から自身の状態とエラーを収集し、アセット origin の
-診断経路を通じて拡張へ返す。診断は `$COPILOT_HOME` 配下の上限付き成果物へ残し、
-成功時の経路と失敗理由の両方を事後確認できるようにする。診断処理そのものの失敗は、
-読書 UI を停止させてはならない。また、診断へ Markdown 本文を記録しない。
+そのため、renderer とシェルが起動初期から自身の状態とエラーを収集する。renderer の診断は
+検証済みメッセージでシェルへ渡し、シェル origin の診断経路を通じて拡張へ返す。
+この経路はインスタンス固有の capability で認証し、
+許可済み schema、body サイズ、受付頻度を越える入力を拒否する。診断は
+`$COPILOT_HOME` 配下で byte 上限内に rotation され、成功時の経路と失敗理由の両方を
+事後確認できるようにする。診断処理そのものの失敗は、読書 UI を停止させてはならない。
+また、診断へ Markdown 本文、URL、user agent、workspace/session 情報を記録しない。
 
 ## 実装者が守る不変条件
 
-1. `renderer.js`、`skimdown.css`、`vendor/**` は、採用した
-   SkimDownForWindows の上流リビジョンからのバイト単位コピーとする。手で編集しない。
-   変更が必要なら上流を修正し、上流リビジョンを更新して再コピーする。
+1. `skimdown.css` と通常の `vendor/**` 更新は、採用した SkimDownForWindows の上流リビジョン
+   からのバイト単位コピーとする。緊急の依存物修正は、公式 release の immutable な取得元を
+   個別に固定してよい。vendored 実行資産は取得元、ファイル単位の SHA-256、依存コンポーネント
+   情報で固定し、repository 内と固定取得元の両方に対して CI で検証する。
+   `renderer.js` も上流同期を原則とするが、安全な上流リビジョンを
+   待てない脆弱性には、回帰テスト付きの最小限のローカル hardening patch を許可する。
+   上流へ修正が入った時点で差分を解消し、再び上流コピーへ戻す。
 2. canvas の frame はすでに WebView2 内で動き、`window.chrome.webview` はホストに
    占有されている。素の代入は strict mode で `TypeError` になり得るため、
    互換シムは既存プロパティを調査し、段階的フォールバックで導入する。
 3. 拡張プロセスの stdout は JSON-RPC 専用である。拡張プロセスで `console.log` を使わず、
    ホストのログ経路または診断成果物を使う。
-4. HTTP サーバーは loopback のみにバインドし、アセット origin とコンテンツ origin を
-   分離する。
+4. HTTP サーバーは loopback のみにバインドし、シェル、renderer、コンテンツの 3 origin を
+   分離する。renderer origin に状態 API やシェル資産を置かない。
 5. コンテンツ origin は、選択文書の許可された範囲とメディア種別を越えてファイルを配信しない。
 6. `open()` は冪等に保つ。再接続時の open 再実行で、サーバー、監視、購読を重複させない。
 7. 永続状態を `instanceId` で引かない。セッションは `sessionId`、文書はファイルパスまたは
    セッション内の安定 ID、設定はユーザースコープで識別する。
-8. renderer の準備完了を単発通知の受信だけに依存させない。現在状態を問い合わせ可能にする。
+8. renderer の準備完了を単発通知の受信だけに依存させない。検証済みメッセージで現在状態を
+   再問い合わせ可能にする。
 9. 実行時状態と診断でユーザーの worktree を汚さない。
 10. テーマはホストトークンへ追従し、独立した常用パレットを導入しない。
+11. 各 origin の CSP は `default-src 'none'` を基点にし、新しい資源や接続先を暗黙に許可しない。
+12. シェル origin の API と SSE は、インスタンス capability と同一 origin のブラウザー要求を
+    必須にする。loopback bind や port 番号だけを認証として扱わない。
+13. ローカルファイル操作は、workspace、セッションで登録された文書、または明示的に承認された
+    root の内側に限定し、クライアントが送るパスをそのまま信頼しない。
+14. 診断 API は schema、body サイズ、受付頻度、保存総量の境界を外さない。
 
 これらを変更する必要がある場合は、コード変更より先に、または同じ変更の中で ADR を追加し、
 この文書を新しい現状へ更新する。

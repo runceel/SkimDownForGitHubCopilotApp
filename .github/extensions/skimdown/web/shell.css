@@ -26,6 +26,11 @@ body {
     line-height: var(--leading-body-medium, 1.43);
 }
 
+.icon-definitions {
+    position: absolute;
+    overflow: hidden;
+}
+
 #app {
     display: flex;
     height: 100%;

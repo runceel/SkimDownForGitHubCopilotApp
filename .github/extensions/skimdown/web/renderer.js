@@ -38,8 +38,6 @@
     var currentSourceDir = "";
     var currentContentBaseUri = "";
     var currentRemoteContentId = "";
-    var lastRenderedMarkdown = "";
-    var lastRenderedHtml = "";
     var currentTheme = "light";       // "light" | "dark" | "custom"
     var currentThemeType = "light";   // "light" | "dark" — drives hljs + Mermaid choice
     var currentThemeIsDark = false;
@@ -1548,15 +1546,15 @@
         applyZoomDelta(normalizeWheelDeltaY(ev));
     }
 
-    function rewriteResourceUrls(html, remoteContentToken) {
+    function rewriteResourceUrls(root, remoteContentToken) {
         var summary = {
             blocked: 0,
             proxied: 0,
             policyBlocked: 0,
             hosts: []
         };
-        var tmp = document.createElement("div");
-        tmp.innerHTML = html;
+        // The root has already been sanitized and is still detached from the
+        // live document, so URL rewriting cannot activate untrusted markup.
 
         function isAbsolute(u) {
             return /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(u);
@@ -1655,21 +1653,22 @@
 
             el.setAttribute(
                 name,
-                "/api/remote-content?token=" + encodeURIComponent(remoteContentToken) +
+                "/remote-content?token=" + encodeURIComponent(remoteContentToken) +
                     "&url=" + encodeURIComponent(remote.toString()));
             el.setAttribute("data-remote-resource", "true");
             summary.proxied += 1;
         }
 
-        tmp.querySelectorAll("img[src], audio[src], video[src], source[src], track[src], video[poster]").forEach(function (el) {
+        root.querySelectorAll("[src], [poster], [background]").forEach(function (el) {
             if (el.hasAttribute("src")) rewriteAttribute(el, "src");
             if (el.hasAttribute("poster")) rewriteAttribute(el, "poster");
+            if (el.hasAttribute("background")) rewriteAttribute(el, "background");
         });
 
         // srcset can trigger a request independently of src. Remove it whenever
         // it names a remote URL; when it is the only source, use its first URL as
         // the consent-controlled fallback.
-        tmp.querySelectorAll("img[srcset], source[srcset]").forEach(function (el) {
+        root.querySelectorAll("img[srcset], source[srcset]").forEach(function (el) {
             var srcset = el.getAttribute("srcset") || "";
             var firstRemote = srcset.match(/(?:^|,\s*)((?:https?:)?\/\/[^\s,]+)/i);
             if (!firstRemote) return;
@@ -1682,7 +1681,7 @@
             }
         });
 
-        return { html: tmp.innerHTML, summary: summary };
+        return summary;
     }
 
     // KaTeX emits MathML + a parallel HTML span tree under .katex root. Allow
@@ -1730,6 +1729,27 @@
         });
     }
 
+    function sanitizeRenderedHtml(html) {
+        if (!window.DOMPurify) {
+            var fallback = document.createDocumentFragment();
+            var error = document.createElement("div");
+            error.className = "skim-error";
+            error.textContent = "Markdown rendering unavailable: sanitizer failed to load.";
+            fallback.appendChild(error);
+            return fallback;
+        }
+
+        return window.DOMPurify.sanitize(html, {
+            RETURN_DOM_FRAGMENT: true,
+            USE_PROFILES: { html: true, mathMl: true },
+            ADD_TAGS: KATEX_TAGS.concat(["button"]),
+            ADD_ATTR: KATEX_ATTRS.concat(["target", "rel", "id", "type", "aria-label", "data-source", "width", "height", "checked", "disabled"]),
+            ALLOW_DATA_ATTR: true,
+            FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form"],
+            FORBID_ATTR: ["onerror", "onload", "onclick"],
+        });
+    }
+
     function render(markdown, sourcePath, contentBaseUri, remoteContentId, remoteContentToken, theme, themeType, themeIsDark, themeVars) {
         if (typeof markdown !== "string") markdown = "";
         // If the user switches to another file while the zoom modal is open,
@@ -1756,30 +1776,16 @@
             raw = '<div class="skim-error">Markdown render failed: ' + escapeHtml(String(e)) + '</div>';
         }
 
-        var resourceRewrite = rewriteResourceUrls(raw, remoteContentToken);
-        raw = resourceRewrite.html;
-
-        var clean = window.DOMPurify
-            ? window.DOMPurify.sanitize(raw, {
-                  USE_PROFILES: { html: true, mathMl: true },
-                  ADD_TAGS: KATEX_TAGS.concat(["button"]),
-                  ADD_ATTR: KATEX_ATTRS.concat(["target", "rel", "referrerpolicy", "id", "type", "aria-label", "data-source", "width", "height", "checked", "disabled"]),
-                  ALLOW_DATA_ATTR: true,
-                  FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form"],
-                  FORBID_ATTR: ["onerror", "onload", "onclick"],
-              })
-            : raw;
-
-        lastRenderedMarkdown = markdown;
-        lastRenderedHtml = clean;
-        contentEl.innerHTML = clean;
+        var clean = sanitizeRenderedHtml(raw);
+        var resourceSummary = rewriteResourceUrls(clean, remoteContentToken);
+        contentEl.replaceChildren(clean);
         postToHost({
             type: "remoteContent",
             documentId: currentRemoteContentId,
-            blocked: resourceRewrite.summary.blocked,
-            proxied: resourceRewrite.summary.proxied,
-            policyBlocked: resourceRewrite.summary.policyBlocked,
-            hosts: resourceRewrite.summary.hosts
+            blocked: resourceSummary.blocked,
+            proxied: resourceSummary.proxied,
+            policyBlocked: resourceSummary.policyBlocked,
+            hosts: resourceSummary.hosts
         });
 
         // DOMPurify strips `data-source` on <pre class="mermaid"> when the

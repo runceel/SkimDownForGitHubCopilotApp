@@ -9,7 +9,7 @@ import {
     resolvePublicTarget,
     validateRemoteUrl,
 } from "../lib/remoteContent.mjs";
-import { buildAssetCsp, createInstance } from "../lib/server.mjs";
+import { createInstance } from "../lib/server.mjs";
 
 test("public address policy blocks local and non-routable ranges", () => {
     for (const address of [
@@ -59,15 +59,6 @@ test("DNS answers are rejected when any address is private", async () => {
     );
 });
 
-test("asset CSP permits only the two loopback origins for network access", () => {
-    const csp = buildAssetCsp("http://127.0.0.1:43123/");
-    assert.match(csp, /img-src 'self' http:\/\/127\.0\.0\.1:43123 data: blob:/);
-    assert.match(csp, /media-src 'self' http:\/\/127\.0\.0\.1:43123 blob:/);
-    assert.match(csp, /connect-src 'self'/);
-    assert.doesNotMatch(csp, /https:/);
-    assert.doesNotMatch(csp, /img-src[^;]*\*/);
-});
-
 test("instance requires document consent and still rejects a private target", async () => {
     const temp = await fs.mkdtemp(path.join(os.tmpdir(), "skimdown-privacy-"));
     const previousHome = process.env.COPILOT_HOME;
@@ -91,17 +82,36 @@ test("instance requires document consent and still rejects a private target", as
         assert.equal(shellResponse.status, 200);
         assert.match(shellResponse.headers.get("content-security-policy") || "", /connect-src 'self'/);
 
-        const denied = await fetch(
-            `${instance.url}api/remote-content?url=${encodeURIComponent("https://example.com/pixel.png")}`,
-        );
+        const panelUrl = new URL(instance.url);
+        const origin = panelUrl.origin;
+        const capabilityToken = new URLSearchParams(panelUrl.hash.slice(1)).get("token");
+        const browserHeaders = {
+            Origin: origin,
+            "Sec-Fetch-Site": "same-origin",
+            "X-SkimDown-Capability": capabilityToken,
+        };
+        const stateResponse = await fetch(new URL("/api/state", instance.url), {
+            headers: browserHeaders,
+        });
+        const state = await stateResponse.json();
+        const rendererBaseUri = state.rendererBaseUri;
+        const rendererResponse = await fetch(new URL("/renderer.html", rendererBaseUri));
+        const rendererCsp = rendererResponse.headers.get("content-security-policy") || "";
+        assert.match(rendererCsp, /img-src 'self' data: blob:/);
+        assert.match(rendererCsp, /media-src 'self' blob:/);
+        assert.match(rendererCsp, /connect-src 'none'/);
+
+        const denied = await fetch(new URL(
+            `/remote-content?url=${encodeURIComponent("https://example.com/pixel.png")}`,
+            rendererBaseUri,
+        ));
         assert.equal(denied.status, 403);
 
-        const origin = new URL(instance.url).origin;
-        const grantResponse = await fetch(`${instance.url}api/remote-content/allow`, {
+        const grantResponse = await fetch(new URL("/api/remote-content/allow", instance.url), {
             method: "POST",
             headers: {
+                ...browserHeaders,
                 "Content-Type": "application/json",
-                Origin: origin,
             },
             body: JSON.stringify({ documentId: instance.state.doc.remoteContentId }),
         });
@@ -109,24 +119,27 @@ test("instance requires document consent and still rejects a private target", as
         const grant = await grantResponse.json();
         assert.ok(grant.doc.remoteContentToken);
 
-        const privateResponse = await fetch(
-            `${instance.url}api/remote-content?token=${encodeURIComponent(grant.doc.remoteContentToken)}` +
+        const privateResponse = await fetch(new URL(
+            `/remote-content?token=${encodeURIComponent(grant.doc.remoteContentToken)}` +
                 `&url=${encodeURIComponent("http://127.0.0.1/private.png")}`,
-        );
+            rendererBaseUri,
+        ));
         assert.equal(privateResponse.status, 403);
 
         const secondMarkdownPath = path.join(temp, "second.md");
         await fs.writeFile(secondMarkdownPath, "![other](https://example.com/other.png)\n", "utf8");
         await instance.openTarget(secondMarkdownPath);
-        const staleGrantResponse = await fetch(
-            `${instance.url}api/remote-content?token=${encodeURIComponent(grant.doc.remoteContentToken)}` +
+        const staleGrantResponse = await fetch(new URL(
+            `/remote-content?token=${encodeURIComponent(grant.doc.remoteContentToken)}` +
                 `&url=${encodeURIComponent("https://example.com/pixel.png")}`,
-        );
+            rendererBaseUri,
+        ));
         assert.equal(staleGrantResponse.status, 403);
 
-        const crossOriginGrant = await fetch(`${instance.url}api/remote-content/allow`, {
+        const crossOriginGrant = await fetch(new URL("/api/remote-content/allow", instance.url), {
             method: "POST",
             headers: {
+                ...browserHeaders,
                 "Content-Type": "application/json",
                 Origin: "https://attacker.example",
             },
