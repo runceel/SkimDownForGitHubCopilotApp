@@ -25,7 +25,7 @@
 | `.github/extensions/skimdown/extension.mjs` | canvas の登録、インスタンスのライフサイクル、アクション受付 |
 | `.github/extensions/skimdown/lib/` | loopback サーバー、ソース解決、Markdown 走査、セッション文書、設定、ファイル監視、診断、リモートコンテンツ |
 | `.github/extensions/skimdown/web/` | シェル（`shell.*`）、renderer（`renderer.*`）、ホスト互換シム（`bridge.js`）、`skimdown.css` |
-| `.github/extensions/skimdown/web/vendor/` | vendored 実行資産。手で編集しない |
+| `.github/extensions/skimdown/web/vendor/` | vendored 実行資産。手で編集しない。インストーラーの 1 ファイル上限を超えるものは `<ファイル名>.NNN` のチャンクとして保管する |
 | `.github/extensions/skimdown/scripts/vendor-assets.mjs` | vendored 資産の `refresh` / `sbom` / `verify` / `restore` |
 | `.github/extensions/skimdown/test/` | 拡張プロセス側のテスト |
 | `.github/extensions/skimdown/vendor-lock.json` | 取得元とファイル単位の SHA-256 |
@@ -81,6 +81,7 @@ repository 内の byte 列と `vendor-lock.json` に固定した取得元の両�
 - 実行時状態と診断でユーザーの worktree を汚さない。
 - テーマはホストトークンへ追従させ、独自の常用パレットを持たない。
 - 各 origin の CSP は `default-src 'none'` を基点にし、新しい資源や接続先を暗黙に許可しない。renderer の CSP は外部 origin を許可せず、`img-src` / `media-src` は renderer / content origin と `data:` / `blob:` に限定し、`connect-src` は `'none'` にする。
+- 同梱物のファイルは、拡張インストーラーの 1 ファイル上限（1,000,000 バイト）を超えない。超える vendored 資産はチャンクとして保管し、renderer origin が結合して配信する。チャンクを個別に配信しない。
 - シェル origin の API と SSE は、インスタンス capability と同一 origin のブラウザー要求を必須にする。
 - 診断へ Markdown 本文、URL、user agent、workspace / session 情報を記録しない。
 - セッション本文とメタデータを、明示的な opt-in と有効期限なしに永続化しない。
@@ -162,6 +163,12 @@ vendored ファイルは `vendor-lock.json` に固定した取得元からバイ
 多くは SkimDown for Windows の commit に由来する。範囲を絞ったセキュリティ更新では、
 個別ファイルを依存物の immutable な上流 commit へ固定してもよい。`web/vendor/**` を
 手で編集しない。
+
+拡張インストーラーの 1 ファイル上限を超える資産は、`vendor-lock.json` の `chunks`
+（チャンク長と各チャンクの SHA-256）で分割保管を宣言する。on-disk のチャンクは
+`<ファイル名>.NNN`（3 桁 0 埋め）で、`refresh` / `restore` が上流バイト列から生成し、
+`verify` が各チャンクと結合後のハッシュを検証する。配信時の結合は拡張側が行うため、
+`renderer.html` の参照は上流のまま変えない。
 
 1. 上流 SkimDown for Windows の commit をレビューし、40 文字の完全な SHA を控える。
    個別に更新するファイルは、公式リリースをレビューし、そのファイルの `source` に

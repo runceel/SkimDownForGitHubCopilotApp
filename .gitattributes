@@ -8,4 +8,7 @@
 .github/extensions/skimdown/web/vendor/**/*.css   text eol=lf
 .github/extensions/skimdown/web/vendor/**/*.html  text eol=lf
 .github/extensions/skimdown/web/vendor/**/*.md    text eol=lf
+# 拡張インストーラーの 1 ファイル上限を超える vendored 資産は、
+# byte 単位のチャンクとして同梱し、配信時に結合する。改行変換は禁止する。
+.github/extensions/skimdown/web/vendor/**/*.js.[0-9][0-9][0-9] -text
 *.woff2 -text
