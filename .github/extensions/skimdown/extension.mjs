@@ -209,6 +209,42 @@ const canvas = createCanvas({
             },
         },
         {
+            name: "open_in_browser",
+            description:
+                "Show the canvas panel in the user's default browser, optionally selecting a file or folder first. Reports only whether the handoff succeeded; the panel URL is never returned.",
+            inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                    path: {
+                        type: "string",
+                        description:
+                            "Optional absolute path to a Markdown file or folder to show before handing off.",
+                    },
+                },
+            },
+            handler: async (ctx) => {
+                const instance = await getInstance(ctx.instanceId);
+                const target = typeof ctx.input?.path === "string" ? ctx.input.path.trim() : "";
+                let opened = null;
+                if (target.length > 0) {
+                    try {
+                        opened = await instance.openTarget(target, { approve: true });
+                    } catch (error) {
+                        throw new CanvasError(error?.code || "open_failed", error?.message || String(error));
+                    }
+                }
+                const result = instance.openInBrowser();
+                if (!result.ok) {
+                    throw new CanvasError(
+                        "open_browser_failed",
+                        result.error || "Could not open the panel in the default browser.",
+                    );
+                }
+                return opened ? { ok: true, ...opened } : { ok: true };
+            },
+        },
+        {
             name: "refresh",
             description: "Rescan the current source and push the updated file list to the canvas.",
             inputSchema: { type: "object", additionalProperties: false, properties: {} },
