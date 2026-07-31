@@ -96,6 +96,22 @@
     { "path": "markdown-it-footnote.min.js", "component": "markdown-it-footnote", "sha256": "d6fee58a3b56c5742fa18f3e01f1d317cc99975683ebd39c9195cb2aff0c2e42" },
     { "path": "markdown-it-imsize.min.js", "component": "markdown-it-imsize", "sha256": "6480df65b2cd1b5ea78fe3ddc77191d5eac2e81208575d0bdf43be45e4087a68" },
     { "path": "markdown-it.min.js", "component": "markdown-it", "sha256": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68" },
-    { "path": "mermaid/mermaid.min.js", "component": "mermaid", "sha256": "70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de" }
+    {
+      "path": "mermaid/mermaid.min.js",
+      "component": "mermaid",
+      "sha256": "70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de",
+      "chunks": {
+        "bytes": 524288,
+        "sha256": [
+          "edc857bf8ad368bf97ff5848dd0439461f2460ac53b58b1f6cc4d8493449aac5",
+          "8c7a9e27ba496d04d25c1c9716185aaf9d5ae3ef6d093a5783a6306ac8c8d03f",
+          "ef79bb7da99d7a3ce848e29df40de09ee6cca03e3b15101dd6d93080655a33cd",
+          "10919790fa99d83917114b343a310d3faee9e4e6c2614c97a5c0c454f3419471",
+          "98354d583d9d126593f79154e6f318c8e43ae8644b21bbef9290c91469874ae5",
+          "a90f197efc189debeb94d59c848f6317c785183f0473ddad14d2fe5657979612",
+          "a5f4e5d4bc208e7258bbc408dfcd9cb48599da8c34e46866b4655d4c1512907f"
+        ]
+      }
+    }
   ]
 }

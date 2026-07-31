@@ -23,8 +23,32 @@ const vendorRoot = path.join(extensionRoot, "web", "vendor");
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const commitPattern = /^[a-f0-9]{40}$/;
 
+// The Copilot app extension installer rejects any single file above this size,
+// so oversized upstream assets are stored as chunks and reassembled when served.
+const MAX_ASSET_BYTES = 1_000_000;
+
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function chunkPath(logicalPath, index) {
+  return `${logicalPath}.${String(index).padStart(3, "0")}`;
+}
+
+/** On-disk paths for one manifest entry: the file itself, or its ordered chunks. */
+function storedPaths(file) {
+  if (!file.chunks) {
+    return [file.path];
+  }
+  return file.chunks.sha256.map((_, index) => chunkPath(file.path, index));
+}
+
+function splitBytes(bytes, chunkBytes) {
+  const chunks = [];
+  for (let offset = 0; offset < bytes.length; offset += chunkBytes) {
+    chunks.push(bytes.subarray(offset, Math.min(offset + chunkBytes, bytes.length)));
+  }
+  return chunks.length > 0 ? chunks : [bytes.subarray(0, 0)];
 }
 
 function jsonText(value) {
@@ -51,6 +75,7 @@ function validateManifest(manifest) {
 
   const components = manifest.components ?? {};
   const seenPaths = new Set();
+  const seenStoredPaths = new Set();
   for (const file of manifest.files ?? []) {
     const normalized = path.posix.normalize(file.path ?? "");
     if (
@@ -80,6 +105,34 @@ function validateManifest(manifest) {
       } catch {
         errors.push(`invalid source URL for ${file.path}`);
       }
+    }
+
+    const chunks = file.chunks;
+    if (chunks !== undefined) {
+      if (!chunks || typeof chunks !== "object" || Array.isArray(chunks)) {
+        errors.push(`chunks must be an object for ${file.path}`);
+        continue;
+      }
+      if (!Number.isInteger(chunks.bytes) || chunks.bytes <= 0 || chunks.bytes > MAX_ASSET_BYTES) {
+        errors.push(
+          `chunks.bytes must be an integer between 1 and ${MAX_ASSET_BYTES} for ${file.path}`,
+        );
+      }
+      if (
+        !Array.isArray(chunks.sha256) ||
+        chunks.sha256.length === 0 ||
+        !chunks.sha256.every((hash) => sha256Pattern.test(hash ?? ""))
+      ) {
+        errors.push(`chunks.sha256 must be a non-empty list of SHA-256 hashes for ${file.path}`);
+        continue;
+      }
+    }
+
+    for (const storedPath of storedPaths(file)) {
+      if (seenStoredPaths.has(storedPath)) {
+        errors.push(`duplicate stored path: ${storedPath}`);
+      }
+      seenStoredPaths.add(storedPath);
     }
   }
   if (seenPaths.size === 0) {
@@ -130,7 +183,62 @@ async function listFiles(directory, relativeDirectory = "") {
 }
 
 function expectedPaths(manifest) {
-  return manifest.files.map((file) => file.path).sort();
+  return manifest.files.flatMap((file) => storedPaths(file)).sort();
+}
+
+async function readVendorFile(relativePath, errors) {
+  const absolutePath = path.join(vendorRoot, ...relativePath.split("/"));
+  try {
+    const stat = await lstat(absolutePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      errors.push(`not a regular file: ${relativePath}`);
+      return null;
+    }
+    return await readFile(absolutePath);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      errors.push(`${relativePath}: ${error.message}`);
+    }
+    return null;
+  }
+}
+
+async function verifyChunkedFile(file, errors) {
+  const paths = storedPaths(file);
+  const assembled = createHash("sha256");
+  let complete = true;
+
+  for (const [index, relativePath] of paths.entries()) {
+    const bytes = await readVendorFile(relativePath, errors);
+    if (bytes === null) {
+      complete = false;
+      continue;
+    }
+    const actualHash = sha256(bytes);
+    if (actualHash !== file.chunks.sha256[index]) {
+      errors.push(`${relativePath}: expected ${file.chunks.sha256[index]}, got ${actualHash}`);
+      complete = false;
+    }
+    const isLast = index === paths.length - 1;
+    const validLength = isLast
+      ? bytes.length > 0 && bytes.length <= file.chunks.bytes
+      : bytes.length === file.chunks.bytes;
+    if (!validLength) {
+      errors.push(
+        `${relativePath}: unexpected chunk size ${bytes.length} for chunk size ${file.chunks.bytes}`,
+      );
+      complete = false;
+    }
+    assembled.update(bytes);
+  }
+
+  if (!complete) {
+    return;
+  }
+  const assembledHash = assembled.digest("hex");
+  if (assembledHash !== file.sha256) {
+    errors.push(`${file.path}: assembled chunks expected ${file.sha256}, got ${assembledHash}`);
+  }
 }
 
 async function verifyLocal(manifest) {
@@ -145,22 +253,27 @@ async function verifyLocal(manifest) {
     errors.push(`unlisted file: ${extra}`);
   }
 
+  for (const relativePath of actualPaths) {
+    const stat = await lstat(path.join(vendorRoot, ...relativePath.split("/")));
+    if (stat.size > MAX_ASSET_BYTES) {
+      errors.push(
+        `${relativePath}: ${stat.size} bytes exceeds the ${MAX_ASSET_BYTES} byte installer limit; store the asset as chunks`,
+      );
+    }
+  }
+
   for (const file of manifest.files) {
-    const absolutePath = path.join(vendorRoot, ...file.path.split("/"));
-    try {
-      const stat = await lstat(absolutePath);
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        errors.push(`not a regular file: ${file.path}`);
-        continue;
-      }
-      const actualHash = sha256(await readFile(absolutePath));
-      if (actualHash !== file.sha256) {
-        errors.push(`${file.path}: expected ${file.sha256}, got ${actualHash}`);
-      }
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        errors.push(`${file.path}: ${error.message}`);
-      }
+    if (file.chunks) {
+      await verifyChunkedFile(file, errors);
+      continue;
+    }
+    const bytes = await readVendorFile(file.path, errors);
+    if (bytes === null) {
+      continue;
+    }
+    const actualHash = sha256(bytes);
+    if (actualHash !== file.sha256) {
+      errors.push(`${file.path}: expected ${file.sha256}, got ${actualHash}`);
     }
   }
 
@@ -226,15 +339,65 @@ async function verifySource(manifest) {
   );
 }
 
-async function stageAssets(downloads) {
+/** Maps downloaded upstream bytes onto the files that are stored in the repository. */
+function storedBytes(manifest, downloads) {
+  const stored = new Map();
+  for (const file of manifest.files) {
+    const download = downloads.get(file.path);
+    if (!download) {
+      continue;
+    }
+    if (!file.chunks) {
+      stored.set(file.path, download.bytes);
+      continue;
+    }
+    for (const [index, chunk] of splitBytes(download.bytes, file.chunks.bytes).entries()) {
+      stored.set(chunkPath(file.path, index), chunk);
+    }
+  }
+  return stored;
+}
+
+/** Removes chunks left behind when an asset stops being chunked or shrinks. */
+async function removeStaleChunks(manifest, stored) {
+  for (const file of manifest.files) {
+    const directory = path.join(vendorRoot, ...path.posix.dirname(file.path).split("/"));
+    const basename = path.posix.basename(file.path);
+    const stalePattern = new RegExp(`^${basename.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d{3}$`);
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !stalePattern.test(entry.name)) {
+        continue;
+      }
+      const relativePath = path.posix.join(path.posix.dirname(file.path), entry.name);
+      if (!stored.has(relativePath)) {
+        await rm(path.join(directory, entry.name));
+      }
+    }
+    if (file.chunks && !stored.has(file.path)) {
+      await rm(path.join(vendorRoot, ...file.path.split("/")), { force: true });
+    }
+  }
+}
+
+async function stageAssets(manifest, downloads) {
+  const stored = storedBytes(manifest, downloads);
   const stagingRoot = await mkdtemp(path.join(tmpdir(), "skimdown-vendor-"));
   try {
-    for (const [relativePath, download] of downloads) {
+    for (const [relativePath, bytes] of stored) {
       const stagedPath = path.join(stagingRoot, ...relativePath.split("/"));
       await mkdir(path.dirname(stagedPath), { recursive: true });
-      await writeFile(stagedPath, download.bytes);
+      await writeFile(stagedPath, bytes);
     }
-    for (const relativePath of [...downloads.keys()].sort()) {
+    for (const relativePath of [...stored.keys()].sort()) {
       const destination = path.join(vendorRoot, ...relativePath.split("/"));
       await mkdir(path.dirname(destination), { recursive: true });
       const temporaryDestination = `${destination}.${process.pid}.tmp`;
@@ -247,6 +410,7 @@ async function stageAssets(downloads) {
   } finally {
     await rm(stagingRoot, { recursive: true, force: true });
   }
+  await removeStaleChunks(manifest, stored);
 }
 
 function createSbom(manifest) {
@@ -355,7 +519,7 @@ async function main() {
   if (command === "restore") {
     assertNoArguments(argumentsList);
     const downloads = await downloadAssets(manifest, true);
-    await stageAssets(downloads);
+    await stageAssets(manifest, downloads);
     await verifyLocal(manifest);
     await verifySbom(manifest);
     return;
@@ -369,9 +533,13 @@ async function main() {
     nextManifest.upstream.revision = argumentsList[0];
     const downloads = await downloadAssets(nextManifest, false);
     for (const file of nextManifest.files) {
-      file.sha256 = downloads.get(file.path).sha256;
+      const download = downloads.get(file.path);
+      file.sha256 = download.sha256;
+      if (file.chunks) {
+        file.chunks.sha256 = splitBytes(download.bytes, file.chunks.bytes).map(sha256);
+      }
     }
-    await stageAssets(downloads);
+    await stageAssets(nextManifest, downloads);
     await writeAtomically(manifestPath, jsonText(nextManifest));
     await verifyLocal(nextManifest);
     console.log(

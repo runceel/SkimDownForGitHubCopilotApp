@@ -61,7 +61,9 @@ import { createWatcher } from "./watcher.mjs";
 import { isMarkdownFile } from "./scanner.mjs";
 import { fetchRemoteResource, RemoteContentError } from "./remoteContent.mjs";
 
-const WEB_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web");
+const EXTENSION_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const WEB_DIR = path.join(EXTENSION_DIR, "web");
+const VENDOR_LOCK_PATH = path.join(EXTENSION_DIR, "vendor-lock.json");
 
 const STATIC_TYPES = new Map(Object.entries({
     ".html": "text/html; charset=utf-8",
@@ -96,6 +98,55 @@ const SSE_KEEPALIVE_MS = 25000;
 const MAX_REMOTE_GRANTS = 100;
 const CAPABILITY_BYTES = 32;
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+
+/* Vendored assets that exceed the extension installer's per-file limit are stored
+ * as byte-identical chunks and reassembled here, so the renderer keeps requesting
+ * the upstream file name and receives the upstream bytes. */
+
+let chunkedAssetsCache;
+
+function chunkedAssets() {
+    if (chunkedAssetsCache) return chunkedAssetsCache;
+    const byLogicalPath = new Map();
+    const chunkPaths = new Set();
+    try {
+        const manifest = JSON.parse(fs.readFileSync(VENDOR_LOCK_PATH, "utf8"));
+        for (const file of manifest?.files ?? []) {
+            const count = file?.chunks?.sha256?.length;
+            if (!Number.isInteger(count) || count < 1 || typeof file.path !== "string") continue;
+            const parts = Array.from(
+                { length: count },
+                (_, index) => `vendor/${file.path}.${String(index).padStart(3, "0")}`,
+            );
+            byLogicalPath.set(`vendor/${file.path}`, parts);
+            for (const part of parts) chunkPaths.add(part);
+        }
+    } catch {
+        // A missing or malformed ledger leaves every vendored asset served as-is.
+    }
+    chunkedAssetsCache = { byLogicalPath, chunkPaths };
+    return chunkedAssetsCache;
+}
+
+const assembledAssets = new Map();
+
+function readAssembledAsset(relative, parts) {
+    let pending = assembledAssets.get(relative);
+    if (!pending) {
+        pending = (async () => {
+            const buffers = [];
+            for (const part of parts) {
+                const resolved = path.resolve(WEB_DIR, part);
+                if (!isInside(WEB_DIR, resolved)) throw new Error("chunk outside the web directory");
+                buffers.push(await fsp.readFile(resolved));
+            }
+            return Buffer.concat(buffers);
+        })();
+        pending.catch(() => assembledAssets.delete(relative));
+        assembledAssets.set(relative, pending);
+    }
+    return pending;
+}
 
 /**
  * Create and start the servers plus all state for one canvas instance.
@@ -834,9 +885,11 @@ export async function createInstance(ctx) {
         const resolved = path.resolve(WEB_DIR, relative);
         if (!isInside(WEB_DIR, resolved)) return endWithStatus(res, 403, "forbidden");
 
+        const normalized = relative.replaceAll("\\", "/");
+        const parts = chunkedAssets().byLogicalPath.get(normalized);
         let data;
         try {
-            data = await fsp.readFile(resolved);
+            data = parts ? await readAssembledAsset(normalized, parts) : await fsp.readFile(resolved);
         } catch {
             return endWithStatus(res, 404, "not found");
         }
@@ -1005,6 +1058,8 @@ function isInside(root, candidate) {
 function isAllowedStaticAsset(role, relative) {
     const normalized = relative.replaceAll("\\", "/");
     if (role === "shell") return SHELL_ASSETS.has(normalized);
+    // Chunks are an internal storage detail; only the assembled asset is served.
+    if (chunkedAssets().chunkPaths.has(normalized)) return false;
     return RENDERER_ASSETS.has(normalized) || normalized.startsWith("vendor/");
 }
 

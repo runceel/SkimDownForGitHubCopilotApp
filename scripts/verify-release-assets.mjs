@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const manifestPath = path.join(scriptDirectory, "katex-0.16.22-fonts.sha256");
-const fontDirectory = ".github/extensions/skimdown/web/vendor/katex/fonts";
+const vendorDirectory = ".github/extensions/skimdown/web/vendor";
+const vendorLockPath = ".github/extensions/skimdown/vendor-lock.json";
+const fontDirectory = `${vendorDirectory}/katex/fonts`;
 
 function parseManifest(contents) {
     const entries = [];
@@ -40,10 +42,10 @@ function parseManifest(contents) {
     return entries;
 }
 
-function verifyGitAttributes(entries) {
+function verifyTextUnset(relativePaths) {
     const result = spawnSync(
         "git",
-        ["check-attr", "text", "--", ...entries.map(({ relativePath }) => relativePath)],
+        ["check-attr", "text", "--", ...relativePaths],
         { cwd: repositoryRoot, encoding: "utf8" },
     );
 
@@ -62,7 +64,7 @@ function verifyGitAttributes(entries) {
         }
     }
 
-    for (const { relativePath } of entries) {
+    for (const relativePath of relativePaths) {
         const textAttribute = attributes.get(relativePath);
         if (textAttribute !== "unset") {
             throw new Error(
@@ -70,6 +72,18 @@ function verifyGitAttributes(entries) {
             );
         }
     }
+}
+
+/** Chunked vendored assets are raw byte slices; any newline translation corrupts them. */
+async function chunkPaths() {
+    const manifest = JSON.parse(await readFile(path.join(repositoryRoot, ...vendorLockPath.split("/")), "utf8"));
+    return manifest.files
+        .filter((file) => file.chunks)
+        .flatMap((file) =>
+            file.chunks.sha256.map(
+                (_, index) => `${vendorDirectory}/${file.path}.${String(index).padStart(3, "0")}`,
+            ),
+        );
 }
 
 async function verifyManifestCoverage(entries) {
@@ -100,10 +114,13 @@ async function verifyHashes(entries) {
 
 async function main() {
     const entries = parseManifest(await readFile(manifestPath, "utf8"));
-    verifyGitAttributes(entries);
+    const chunks = await chunkPaths();
+    verifyTextUnset([...entries.map(({ relativePath }) => relativePath), ...chunks]);
     await verifyManifestCoverage(entries);
     await verifyHashes(entries);
-    console.log(`Verified ${entries.length} KaTeX fonts and their Git text attributes.`);
+    console.log(
+        `Verified ${entries.length} KaTeX fonts and the Git text attributes of ${entries.length + chunks.length} binary assets.`,
+    );
 }
 
 main().catch((error) => {

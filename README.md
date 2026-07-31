@@ -28,7 +28,7 @@ GitHub Copilot app の extension canvas として動作するようにしてい�
 バージョンタグへ置き換えた URL を使います。
 
 ```text
-https://github.com/runceel/SkimDownForGitHubCopilotApp/tree/v1.0.0/.github/extensions/skimdown
+https://github.com/runceel/SkimDownForGitHubCopilotApp/tree/v1.0.1/.github/extensions/skimdown
 ```
 
 リリースページには、手動インストール用の ZIP と SHA-256 チェックサムも添付されます。
