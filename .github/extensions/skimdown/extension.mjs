@@ -209,6 +209,23 @@ const canvas = createCanvas({
             },
         },
         {
+            name: "open_in_browser",
+            description:
+                "Show the current canvas panel in the user's default browser. Reports only whether the handoff succeeded; the panel URL is never returned.",
+            inputSchema: { type: "object", additionalProperties: false, properties: {} },
+            handler: async (ctx) => {
+                const instance = await getInstance(ctx.instanceId);
+                const result = instance.openInBrowser();
+                if (!result.ok) {
+                    throw new CanvasError(
+                        "open_browser_failed",
+                        result.error || "Could not open the panel in the default browser.",
+                    );
+                }
+                return { ok: true };
+            },
+        },
+        {
             name: "refresh",
             description: "Rescan the current source and push the updated file list to the canvas.",
             inputSchema: { type: "object", additionalProperties: false, properties: {} },

@@ -83,6 +83,7 @@ repository 内の byte 列と `vendor-lock.json` に固定した取得元の両�
 - 各 origin の CSP は `default-src 'none'` を基点にし、新しい資源や接続先を暗黙に許可しない。renderer の CSP は外部 origin を許可せず、`img-src` / `media-src` は renderer / content origin と `data:` / `blob:` に限定し、`connect-src` は `'none'` にする。
 - 同梱物のファイルは、拡張インストーラーの 1 ファイル上限（1,000,000 バイト）を超えない。超える vendored 資産はチャンクとして保管し、renderer origin が結合して配信する。チャンクを個別に配信しない。
 - シェル origin の API と SSE は、インスタンス capability と同一 origin のブラウザー要求を必須にする。
+- 外部ブラウザーへの引き渡しは、自インスタンスのパネル URL を OS の既定ブラウザーへ渡す操作に限定する。呼び出し側から URL やブラウザーを受け取らず、capability を含む URL をホストの `open()` 戻り値以外の経路（アクションの戻り値、状態問い合わせ、ログ、診断）へ出さない。
 - 診断へ Markdown 本文、URL、user agent、workspace / session 情報を記録しない。
 - セッション本文とメタデータを、明示的な opt-in と有効期限なしに永続化しない。
 

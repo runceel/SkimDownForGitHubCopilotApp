@@ -150,7 +150,7 @@ function readAssembledAsset(relative, parts) {
 
 /**
  * Create and start the servers plus all state for one canvas instance.
- * `ctx`: { instanceId, sessionId, workspacePath, log }
+ * `ctx`: { instanceId, sessionId, workspacePath, log, launchExternal? }
  */
 export async function createInstance(ctx) {
     const state = {
@@ -175,6 +175,8 @@ export async function createInstance(ctx) {
     const remoteGrantDocuments = new Map();
     const approvedRoots = new Set();
     const capabilityToken = randomBytes(CAPABILITY_BYTES).toString("base64url");
+    // Tests substitute the launcher; production hands the URL to the OS handler.
+    const launchExternal = typeof ctx.launchExternal === "function" ? ctx.launchExternal : openExternal;
 
     approveRoot(state.workspacePath);
     approveRoot(sessionArtifactsDir(ctx.sessionId));
@@ -788,11 +790,11 @@ export async function createInstance(ctx) {
                 return sendJson(res, 200, { ok: true });
             }
             case "/api/open-browser": {
-                const opened = openExternal(url);
+                const opened = openPanelInBrowser();
                 return sendJson(res, opened.ok ? 200 : 500, opened);
             }
             case "/api/open-external": {
-                const opened = openExternal(String(body.href || ""));
+                const opened = launchExternal(String(body.href || ""));
                 return sendJson(res, opened.ok ? 200 : 400, opened);
             }
             default:
@@ -1004,6 +1006,20 @@ export async function createInstance(ctx) {
         }
     }
 
+    /* ADR 0012: the panel is handed to the OS default browser as-is. The caller
+     * never supplies a URL or a browser, and no result carries the capability. */
+    function openPanelInBrowser() {
+        const result = launchExternal(url);
+        if (result?.ok) return { ok: true };
+        return { ok: false, error: withoutCapability(result?.error) };
+    }
+
+    function withoutCapability(message) {
+        const fallback = "Could not open in browser";
+        if (typeof message !== "string" || message.length === 0) return fallback;
+        return message.includes(capabilityToken) || message.includes(url) ? fallback : message;
+    }
+
     return {
         url,
         assetPort,
@@ -1019,6 +1035,7 @@ export async function createInstance(ctx) {
         buildState,
         broadcast,
         dispose,
+        openInBrowser: openPanelInBrowser,
         async showInline(id) {
             await refreshListing();
             return selectInline(id);
