@@ -211,10 +211,29 @@ const canvas = createCanvas({
         {
             name: "open_in_browser",
             description:
-                "Show the current canvas panel in the user's default browser. Reports only whether the handoff succeeded; the panel URL is never returned.",
-            inputSchema: { type: "object", additionalProperties: false, properties: {} },
+                "Show the canvas panel in the user's default browser, optionally selecting a file or folder first. Reports only whether the handoff succeeded; the panel URL is never returned.",
+            inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                    path: {
+                        type: "string",
+                        description:
+                            "Optional absolute path to a Markdown file or folder to show before handing off.",
+                    },
+                },
+            },
             handler: async (ctx) => {
                 const instance = await getInstance(ctx.instanceId);
+                const target = typeof ctx.input?.path === "string" ? ctx.input.path.trim() : "";
+                let opened = null;
+                if (target.length > 0) {
+                    try {
+                        opened = await instance.openTarget(target, { approve: true });
+                    } catch (error) {
+                        throw new CanvasError(error?.code || "open_failed", error?.message || String(error));
+                    }
+                }
                 const result = instance.openInBrowser();
                 if (!result.ok) {
                     throw new CanvasError(
@@ -222,7 +241,7 @@ const canvas = createCanvas({
                         result.error || "Could not open the panel in the default browser.",
                     );
                 }
-                return { ok: true };
+                return opened ? { ok: true, ...opened } : { ok: true };
             },
         },
         {
