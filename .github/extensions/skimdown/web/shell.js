@@ -19,6 +19,8 @@
     var ZOOM_STEP = 1.1;
     var CONTENT_WIDTHS = ["760px", "960px", "1200px", "none"];
     var CAPABILITY_TOKEN = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
+    var SELECTION_MAX = 32768;
+    var QUESTION_MAX = 2000;
 
     var el = {
         body: document.body,
@@ -40,6 +42,7 @@
         docTitle: document.getElementById("doc-title"),
         docSubtitle: document.getElementById("doc-subtitle"),
         btnOpenBrowser: document.getElementById("btn-open-browser"),
+        btnAsk: document.getElementById("btn-ask"),
         btnFind: document.getElementById("btn-find"),
         btnZoomIn: document.getElementById("btn-zoom-in"),
         btnZoomOut: document.getElementById("btn-zoom-out"),
@@ -56,6 +59,11 @@
         pathInput: document.getElementById("path-input"),
         btnPathOpen: document.getElementById("btn-path-open"),
         btnPathCancel: document.getElementById("btn-path-cancel"),
+        askbar: document.getElementById("askbar"),
+        askScope: document.getElementById("ask-scope"),
+        askInput: document.getElementById("ask-input"),
+        btnAskSend: document.getElementById("btn-ask-send"),
+        btnAskCancel: document.getElementById("btn-ask-cancel"),
         linkbar: document.getElementById("linkbar"),
         remotebar: document.getElementById("remotebar"),
         remoteText: document.getElementById("remote-text"),
@@ -91,6 +99,8 @@
         expanded: new Set(),
         expandedRoot: null,
         search: { query: "", caseSensitive: false },
+        selection: { empty: true, length: 0 },
+        askPending: false,
         pendingExternalHref: null,
         remoteContentFailures: 0,
         rendererOrigin: null,
@@ -124,6 +134,7 @@
         "content-width-narrower",
         "select-all",
         "open-folder",
+        "ask",
     ]);
     var handshakeTimer = 0;
     var handshakePoll = 0;
@@ -243,6 +254,13 @@
                     });
             case "remoteContent/error":
                 return /^[a-f0-9]{64}$/.test(msg.documentId || "");
+            case "selection":
+                return typeof msg.empty === "boolean"
+                    && Number.isFinite(msg.length)
+                    && msg.length >= 0
+                    && msg.length <= SELECTION_MAX;
+            case "selection/value":
+                return typeof msg.text === "string" && msg.text.length <= SELECTION_MAX;
             default:
                 return false;
         }
@@ -423,6 +441,13 @@
                 break;
             case "remoteContent/error":
                 handleRemoteContentError(msg);
+                break;
+            case "selection":
+                state.selection = { empty: msg.empty, length: msg.length };
+                renderAskScope();
+                break;
+            case "selection/value":
+                resolveSelectionRequest(msg.text);
                 break;
             default:
                 break;
@@ -847,6 +872,7 @@
             state.doc = doc;
             resetToc();
             resetRemoteContentUi();
+            resetAskUi();
             renderDocHeader(doc);
             el.emptyState.hidden = true;
             pushDocToRenderer(doc);
@@ -855,6 +881,7 @@
             state.doc = null;
             resetToc();
             resetRemoteContentUi();
+            resetAskUi();
             renderDocHeader(null);
             el.emptyState.hidden = false;
             postToRenderer({ type: "empty" });
@@ -1381,6 +1408,7 @@
                 state.doc = result.doc;
                 resetToc();
                 resetRemoteContentUi();
+                resetAskUi();
                 pushDocToRenderer(result.doc);
             })
             .catch(function (error) {
@@ -1490,6 +1518,9 @@
             case "open-folder":
                 openPathBar();
                 break;
+            case "ask":
+                openAskBar();
+                break;
             default:
                 break;
         }
@@ -1508,6 +1539,7 @@
         if (ev.shiftKey) return lower === "g" ? "find-prev" : null;
         switch (lower) {
             case "o": return "open-folder";
+            case "i": return "ask";
             case "f": return "find";
             case "g": return "find-next";
             case "b": return "toggle-sidebar";
@@ -1532,6 +1564,10 @@
                 closePathBar();
                 return;
             }
+            if (!el.askbar.hidden) {
+                closeAskBar();
+                return;
+            }
             if (!el.findbar.hidden) {
                 closeFind();
                 return;
@@ -1552,7 +1588,7 @@
             if (!editable) handleTreeKeys(ev);
             return;
         }
-        if (editable && id !== "find" && id !== "find-next" && id !== "find-prev") return;
+        if (editable && id !== "find" && id !== "find-next" && id !== "find-prev" && id !== "ask") return;
 
         ev.preventDefault();
         handleShortcut(id);
@@ -1603,6 +1639,131 @@
                 closePathBar();
             })
             .catch(showError);
+    }
+
+    // ---------- ask Copilot ----------
+
+    /* The reader is otherwise a dead end: you notice something while reading and
+     * then have to restate the context by hand in the chat box. This bar hands
+     * the passage you are looking at to the session instead.
+     *
+     * Nothing here is automatic. The bar only opens on an explicit gesture and
+     * only sends on an explicit gesture, because a canvas that can talk to the
+     * agent unprompted can be driven by the document it is displaying. The
+     * extension decides what a question is actually about — the shell never
+     * names a file. */
+
+    var SELECTION_REQUEST_TIMEOUT_MS = 2000;
+    var pendingSelection = null;
+
+    function resolveSelectionRequest(text) {
+        if (!pendingSelection) return;
+        var pending = pendingSelection;
+        pendingSelection = null;
+        clearTimeout(pending.timer);
+        pending.resolve(typeof text === "string" ? text : "");
+    }
+
+    /** The body of a selection is only ever fetched at send time, so an idle
+     *  reader never streams its document across the frame boundary. */
+    function requestSelectionText() {
+        if (pendingSelection) resolveSelectionRequest("");
+        return new Promise(function (resolve) {
+            pendingSelection = {
+                resolve: resolve,
+                timer: setTimeout(function () {
+                    resolveSelectionRequest("");
+                }, SELECTION_REQUEST_TIMEOUT_MS),
+            };
+            postToRenderer({ type: "selection/request" });
+        });
+    }
+
+    function resetAskUi() {
+        state.selection = { empty: true, length: 0 };
+        resolveSelectionRequest("");
+        closeAskBar();
+    }
+
+    function askScope() {
+        return state.selection.empty ? "document" : "selection";
+    }
+
+    function renderAskScope() {
+        if (!el.askScope) return;
+        if (askScope() === "selection") {
+            el.askScope.textContent = "Selection · " + state.selection.length
+                + (state.selection.length === 1 ? " character" : " characters");
+        } else {
+            el.askScope.textContent = "Whole document · " + ((state.doc && state.doc.title) || "Untitled");
+        }
+        el.askScope.title = el.askScope.textContent;
+    }
+
+    function updateAskSendState() {
+        if (!el.btnAskSend) return;
+        el.btnAskSend.disabled = state.askPending || el.askInput.value.trim().length === 0;
+    }
+
+    function openAskBar() {
+        if (!state.doc) return;
+        el.askbar.hidden = false;
+        renderAskScope();
+        updateAskSendState();
+        el.askInput.focus();
+        el.askInput.select();
+    }
+
+    function closeAskBar() {
+        el.askbar.hidden = true;
+        el.askInput.value = "";
+        updateAskSendState();
+    }
+
+    function activeSectionTitle() {
+        if (!state.toc.activeId) return "";
+        var heading = state.toc.headings.find(function (candidate) {
+            return candidate.id === state.toc.activeId;
+        });
+        return (heading && heading.title) || "";
+    }
+
+    function submitAsk() {
+        var question = el.askInput.value.trim();
+        if (!question || state.askPending) return;
+
+        var scope = askScope();
+        var askedAbout = state.doc;
+        state.askPending = true;
+        updateAskSendState();
+
+        var quoted = scope === "selection" ? requestSelectionText() : Promise.resolve("");
+        quoted
+            .then(function (text) {
+                // Fetching the passage yields to the event loop, so the reader
+                // may have moved on. The extension resolves the document from
+                // its own state, and answering about the wrong one is worse
+                // than not answering.
+                if (state.doc !== askedAbout) {
+                    throw new Error("The document changed before the question was sent.");
+                }
+                var body = {
+                    question: question.slice(0, QUESTION_MAX),
+                    scope: text ? scope : "document",
+                    sectionTitle: activeSectionTitle().slice(0, 512),
+                };
+                if (text) body.quote = { text: text.slice(0, SELECTION_MAX) };
+                return api("/api/ask", body);
+            })
+            .then(function () {
+                closeAskBar();
+                showToast("Sent to Copilot");
+            })
+            .catch(showError)
+            .then(function () {
+                state.askPending = false;
+                updateAskSendState();
+            });
     }
 
     // ---------- sidebar resize ----------
@@ -1782,6 +1943,22 @@
                 if (!result.ok) showToast(result.error || "Could not open in browser");
             })
             .catch(showError);
+    });
+
+    el.btnAsk.addEventListener("click", function () {
+        if (el.askbar.hidden) openAskBar();
+        else closeAskBar();
+    });
+
+    el.btnAskSend.addEventListener("click", submitAsk);
+    el.btnAskCancel.addEventListener("click", closeAskBar);
+
+    el.askInput.addEventListener("input", updateAskSendState);
+
+    el.askInput.addEventListener("keydown", function (ev) {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        submitAsk();
     });
 
     el.btnFind.addEventListener("click", function () {

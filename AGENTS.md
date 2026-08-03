@@ -83,8 +83,12 @@ repository 内の byte 列と `vendor-lock.json` に固定した取得元の両�
 - 各 origin の CSP は `default-src 'none'` を基点にし、新しい資源や接続先を暗黙に許可しない。renderer の CSP は外部 origin を許可せず、`img-src` / `media-src` は renderer / content origin と `data:` / `blob:` に限定し、`connect-src` は `'none'` にする。
 - 同梱物のファイルは、拡張インストーラーの 1 ファイル上限（1,000,000 バイト）を超えない。超える vendored 資産はチャンクとして保管し、renderer origin が結合して配信する。チャンクを個別に配信しない。
 - シェル origin の API と SSE は、インスタンス capability と同一 origin のブラウザー要求を必須にする。
-- 診断へ Markdown 本文、URL、user agent、workspace / session 情報を記録しない。
+- 診断へ Markdown 本文、URL、user agent、workspace / session 情報を記録しない。質問文と
+  引用本文も同様に記録しない。
 - セッション本文とメタデータを、明示的な opt-in と有効期限なしに永続化しない。
+- セッションへの user turn 送信は、canvas 上のユーザーの明示操作からのみ開始する。監視、
+  イベント、canvas アクション、再接続を起点にしない。送信対象の文書同一性は拡張プロセス側の
+  選択状態を正とし、送る文面へ拡張がユーザーの意図を足さない。
 
 これらを変える必要があるときは、コード変更より前か同じ変更の中で ADR を追加し、
 `docs/architecture.md` を新しい現状へ更新する。
@@ -100,12 +104,14 @@ flowchart TB
         end
     end
     ext["extension.mjs + lib/**<br/>Node 側"]
+    chat["ホストセッション（chat）"]
 
     shell -- "postMessage（bridge.js が chrome.webview を模倣）" --> renderer
-    renderer -- "ready / link / shortcut / 検索結果" --> shell
+    renderer -- "ready / link / shortcut / 選択 / 検索結果" --> shell
     shell -- "fetch /api/*" --> ext
     ext -- "SSE /events" --> shell
     renderer -- "許可済みリモートメディアを同一 origin URL で要求" --> ext
+    ext -- "ユーザー操作による user turn" --> chat
 ```
 
 移植の前提は、レンダラーを原則として上流から同期することである。`renderer.js` が
@@ -123,6 +129,11 @@ SkimDown for Windows からのバイト単位のコピーで、`renderer.html` �
 状態 API と SSE は canvas インスタンスごとの一時的な capability で認証し、同一 origin の
 ブラウザー要求だけを受け付ける。ファイル選択は workspace、セッション文書、または明示的に
 開いたルートの内側に限定する。
+
+読み手が canvas 上で明示的に要求したときだけ、拡張は読書対象と引用を添えた user turn を
+ホストセッションへ 1 件送る。選択範囲の取得は `bridge.js` に閉じ、`renderer.js` は
+無改変のままにする。送信対象の文書は拡張プロセス側の選択状態から決め、クライアントが送る
+パスを信頼しない。
 
 テーマはアプリのトークン（`--background-color-default` など）を読み取り、SkimDown の
 カスタムテーマ機構（`--skim-*`）へ写して渡す。アプリのテーマ変更は `MutationObserver` で

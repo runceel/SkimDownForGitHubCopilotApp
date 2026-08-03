@@ -20,6 +20,11 @@
  *
  * Envelope: { __skim: true, payload: <renderer message> }
  *
+ * It also raises two things upstream does not expose to a host: the current
+ * text selection (on request, plus a body-free change notification) and the
+ * Ctrl+I "ask" shortcut. Both belong here rather than in renderer.js, which is
+ * kept in sync with upstream.
+ *
  * This file must execute before `renderer.js`, which is why it is a plain
  * (non-deferred) script placed ahead of the deferred renderer in
  * renderer.html. Being first also lets it capture boot-time errors thrown by
@@ -132,6 +137,12 @@
             if (lastReady) post(lastReady);
             return;
         }
+        // Same idea: the selection lives in this document, not in renderer.js's
+        // message contract, so this is answered here and never forwarded.
+        if (payload && payload.type === "selection/request") {
+            post({ type: "selection/value", text: readSelection().slice(0, SELECTION_MAX) });
+            return;
+        }
         setTimeout(function () {
             fanOut(payload);
         }, 0);
@@ -157,6 +168,57 @@
             console.warn("skimdown bridge post failed", e);
         }
     }
+
+    // ---------- selection and reader shortcuts ----------
+
+    /* Upstream renderer.js keeps the current selection to itself — it only ever
+     * uses it to seed the in-document search. Asking Copilot about a passage
+     * needs that same selection in the shell, and renderer.js is synced from
+     * upstream byte for byte, so the capability is added here instead.
+     *
+     * A selection can be the whole document, so its body is never pushed on
+     * change: selection events carry only whether something is selected and how
+     * much. The shell requests the body once, when the reader actually sends a
+     * question. */
+
+    var SELECTION_MAX = 32768;
+    var SELECTION_DEBOUNCE_MS = 150;
+    var selectionTimer = 0;
+
+    function readSelection() {
+        try {
+            var selection = window.getSelection();
+            return selection ? String(selection.toString()) : "";
+        } catch (e) {
+            recordError("selection read failed: " + ((e && e.message) || e));
+            return "";
+        }
+    }
+
+    function announceSelection() {
+        // Report the length that would actually be sent, so the shell can say
+        // so without holding the text.
+        var length = Math.min(readSelection().length, SELECTION_MAX);
+        post({ type: "selection", empty: length === 0, length: length });
+    }
+
+    document.addEventListener("selectionchange", function () {
+        if (selectionTimer) clearTimeout(selectionTimer);
+        selectionTimer = setTimeout(function () {
+            selectionTimer = 0;
+            announceSelection();
+        }, SELECTION_DEBOUNCE_MS);
+    });
+
+    // Ctrl+I while the reader frame holds focus. renderer.js forwards a fixed
+    // set of upstream shortcuts and knows nothing about this one, so it is
+    // raised here and travels over the existing `shortcut` message.
+    window.addEventListener("keydown", function (ev) {
+        if (!ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey) return;
+        if ((ev.key || "").toLowerCase() !== "i") return;
+        ev.preventDefault();
+        post({ type: "shortcut", id: "ask" });
+    });
 
     // ---------- WebView2-compatible surface ----------
 

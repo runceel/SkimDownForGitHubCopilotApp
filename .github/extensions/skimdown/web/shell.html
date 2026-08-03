@@ -25,6 +25,7 @@
             <symbol id="i-up" viewBox="0 0 16 16"><path d="m8 4.5 5 5-1.06 1.06L8 6.62 4.06 10.56 3 9.5Z"/></symbol>
             <symbol id="i-down" viewBox="0 0 16 16"><path d="m8 11.5-5-5 1.06-1.06L8 9.38l3.94-3.94L13 6.5Z"/></symbol>
             <symbol id="i-toc" viewBox="0 0 16 16"><path d="M1.5 2.5h2v2h-2Zm4 0H15V4H5.5Zm-4 4.5h2v2h-2Zm4 0H15v1.5H5.5Zm-4 4.5h2v2h-2Zm4 0H15V13H5.5Z"/></symbol>
+            <symbol id="i-ask" viewBox="0 0 16 16"><path d="M2 1h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H7l-4 3v-3H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2Z"/></symbol>
         </defs>
     </svg>
 
@@ -84,6 +85,9 @@
                     <button type="button" class="icon-button" id="btn-open-browser" title="Open in default browser" aria-label="Open in default browser">
                         <svg aria-hidden="true"><use href="#i-external" /></svg>
                     </button>
+                    <button type="button" class="icon-button" id="btn-ask" title="Ask Copilot about this document (Ctrl+I)" aria-label="Ask Copilot">
+                        <svg aria-hidden="true"><use href="#i-ask" /></svg>
+                    </button>
                     <button type="button" class="icon-button" id="btn-find" title="Find in this file (Ctrl+F)" aria-label="Find">
                         <svg aria-hidden="true"><use href="#i-search" /></svg>
                     </button>
@@ -121,6 +125,16 @@
                 <input type="text" id="path-input" placeholder="Path to a folder or .md file" autocomplete="off" spellcheck="false" />
                 <button type="button" class="text-button" id="btn-path-open">Open</button>
                 <button type="button" class="icon-button" id="btn-path-cancel" title="Close" aria-label="Close">
+                    <svg aria-hidden="true"><use href="#i-close" /></svg>
+                </button>
+            </div>
+
+            <div class="bar" id="askbar" hidden>
+                <span class="chip" id="ask-scope"></span>
+                <label class="sr-only" for="ask-input">Ask Copilot about this document</label>
+                <input type="text" id="ask-input" placeholder="Ask Copilot about what you are reading" autocomplete="off" maxlength="2000" />
+                <button type="button" class="text-button" id="btn-ask-send">Send</button>
+                <button type="button" class="icon-button" id="btn-ask-cancel" title="Close" aria-label="Close">
                     <svg aria-hidden="true"><use href="#i-close" /></svg>
                 </button>
             </div>
