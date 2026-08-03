@@ -28,7 +28,7 @@ GitHub Copilot app の extension canvas として動作するようにしてい�
 バージョンタグへ置き換えた URL を使います。
 
 ```text
-https://github.com/runceel/SkimDownForGitHubCopilotApp/tree/v1.0.1/.github/extensions/skimdown
+https://github.com/runceel/SkimDownForGitHubCopilotApp/tree/v1.1.0/.github/extensions/skimdown
 ```
 
 リリースページには、手動インストール用の ZIP と SHA-256 チェックサムも添付されます。
@@ -115,6 +115,7 @@ ZIP を展開すると、ユーザーの拡張ディレクトリへ配置でき�
 添えた本文は引用として明示的に囲み、指示ではなく資料として扱うよう伝えます。質問文と引用本文は
 診断情報に記録しません。
 
+## リモートコンテンツとプライバシー
 
 Markdown 内の HTTP(S) 画像とメディアは、既定では読み込みません。文書にリモート参照があると
 確認バーが表示され、「この文書で読み込む」を選んだ場合だけ読み込みます。許可は表示中の文書の
