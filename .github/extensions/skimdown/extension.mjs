@@ -63,6 +63,22 @@ async function getInstance(instanceId) {
     return instance;
 }
 
+/* The only outward call this provider makes. It is reached from `/api/ask`,
+ * which is reached only from a button or a keystroke in the reader, so a turn
+ * appears in the transcript only when the reader asked for one. `enqueue` keeps
+ * a question from cutting into a turn that is already running. */
+async function askSession(message) {
+    if (typeof session?.send !== "function") {
+        throw new Error("this session does not accept messages");
+    }
+    return session.send({
+        prompt: message.prompt,
+        attachments: message.attachments,
+        displayPrompt: message.displayPrompt,
+        mode: "enqueue",
+    });
+}
+
 /** `open` must be idempotent: the runtime replays it after provider reconnects. */
 async function openCanvas(ctx) {
     let instance = instances.get(ctx.instanceId);
@@ -72,6 +88,7 @@ async function openCanvas(ctx) {
             sessionId: session.sessionId,
             workspacePath: session.workspacePath,
             log,
+            ask: askSession,
         });
         instances.set(ctx.instanceId, instance);
     }

@@ -419,6 +419,32 @@ body[data-sidebar-position="right"] #sidebar {
     background: var(--true-color-blue-muted, var(--shell-accent-mid));
 }
 
+.text-button:disabled,
+.text-button[disabled] {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.text-button:disabled:hover,
+.text-button[disabled]:hover {
+    background: transparent;
+}
+
+/* Names the passage a question will carry, so the reader can see the scope
+ * before sending. */
+.bar .chip {
+    flex: 0 1 auto;
+    max-width: 40%;
+    overflow: hidden;
+    padding: 3px 8px;
+    border: 1px solid var(--border-color-default, var(--shell-border));
+    border-radius: 999px;
+    color: var(--text-color-muted, var(--shell-muted));
+    font-size: 0.8em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ---------- privacy dialog ---------- */
 
 #privacy-dialog {
