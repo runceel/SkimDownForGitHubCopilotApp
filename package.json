@@ -4,7 +4,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "test": "node --test test/*.test.mjs \".github/extensions/skimdown/test/*.test.mjs\""
+    "test": "node --test test/*.test.mjs .github/extensions/skimdown/test/*.test.mjs"
   },
   "devDependencies": {
     "jsdom": "29.1.1"
