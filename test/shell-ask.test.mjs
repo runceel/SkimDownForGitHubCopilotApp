@@ -105,6 +105,19 @@ function flush() {
     return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+test("external links open directly in the browser without showing the prompt", async (t) => {
+    const shell = createShell();
+    t.after(() => shell.close());
+
+    shell.fromRenderer({ type: "link", kind: "external", href: "https://example.com" });
+    await flush();
+
+    const requests = shell.requests.filter((entry) => entry.url === "/api/open-external");
+    assert.equal(requests.length, 1);
+    assert.deepEqual(JSON.parse(requests[0].init.body), { href: "https://example.com" });
+    assert.equal(shell.document.getElementById("linkbar").hidden, true);
+});
+
 test("the ask bar opens only on request and names what a question will carry", (t) => {
     const shell = createShell();
     t.after(() => shell.close());

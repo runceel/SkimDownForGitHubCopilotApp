@@ -1303,8 +1303,7 @@
     function handleLinkMessage(msg) {
         if (msg.kind === "anchor") return; // Handled inside the renderer.
         if (msg.kind === "external") {
-            promptExternal(msg.href);
-            return;
+            return openExternalHref(msg.href);
         }
         api("/api/link", { href: msg.href })
             .then(function (result) {
@@ -1315,12 +1314,21 @@
                     return api("/api/open", { path: result.path });
                 }
                 if (result.kind === "external") {
-                    promptExternal(result.href);
-                    return null;
+                    return openExternalHref(result.href);
                 }
                 showToast("Could not open link target: " + (msg.href || ""));
                 return null;
             })
+            .catch(showError);
+    }
+
+    function openExternalHref(href) {
+        closeExternalPrompt();
+        if (typeof href !== "string" || href.length === 0) {
+            showToast("Could not open link target: " + (href || ""));
+            return Promise.resolve(null);
+        }
+        return api("/api/open-external", { href: href })
             .catch(showError);
     }
 
