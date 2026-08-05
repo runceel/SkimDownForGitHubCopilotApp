@@ -18,6 +18,7 @@ import path from "node:path";
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
 
 import { createInstance } from "./lib/server.mjs";
+import { createLogger } from "./lib/log.mjs";
 import { addInlineDoc, recordTouchedFile } from "./lib/sessionDocs.mjs";
 import { isMarkdownFile } from "./lib/scanner.mjs";
 import { classifyPath, SOURCE_SESSION } from "./lib/sources.mjs";
@@ -45,19 +46,32 @@ const PATH_KEYS = ["path", "file_path", "filePath", "filename", "file", "target_
 
 let session;
 
-function log(message) {
-    // stdout is the JSON-RPC channel, so console.log would corrupt the
-    // protocol. Everything user-facing goes through session.log.
+/* stdout is the JSON-RPC channel, so console.log would corrupt the protocol.
+ * Everything user-facing goes through session.log, which absorbs its own
+ * failures so logging can never break the canvas. */
+const log = createLogger(() => session);
+
+/* Last resort. A failure anywhere in an unawaited promise would otherwise end
+ * the extension process and take the reader down with it, so the reason is
+ * recorded and the canvas is left running. stderr is the fallback because
+ * stdout belongs to JSON-RPC. */
+function reportFatal(kind, error) {
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    log(`skimdown: ${kind} — ${detail}`, { level: "error" });
     try {
-        session?.log?.(message, { level: "info", ephemeral: true });
+        process.stderr.write(`[skimdown] ${kind}: ${detail}\n`);
     } catch {
-        try {
-            session?.log?.(message, { ephemeral: true });
-        } catch {
-            // Logging must never break the canvas.
-        }
+        // Nothing left to report through.
     }
 }
+
+process.on("unhandledRejection", (reason) => {
+    reportFatal("unhandled rejection", reason);
+});
+
+process.on("uncaughtException", (error) => {
+    reportFatal("uncaught exception", error);
+});
 
 async function getInstance(instanceId) {
     const instance = instances.get(instanceId);
@@ -436,7 +450,16 @@ async function onPostToolUse(input) {
     }
 }
 
-session = await joinSession({
-    canvases: [canvas],
-    hooks: { onPostToolUse },
-});
+/* Startup is the one failure the guards above must not hide: without a session
+ * there is no canvas to keep alive, so a join failure stays fatal and visible
+ * to the host. Only failures after this point are survivable. */
+try {
+    session = await joinSession({
+        canvases: [canvas],
+        hooks: { onPostToolUse },
+    });
+} catch (error) {
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    process.stderr.write(`[skimdown] failed to join session: ${detail}\n`);
+    process.exit(1);
+}
