@@ -4,8 +4,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { resolveWorkspaceRoot } from "../lib/paths.mjs";
+
+/* execFile is callback-based, so awaiting it directly resolves on the
+ * ChildProcess rather than on exit. The repository would then still be
+ * uninitialised when the assertion runs, and resolveWorkspaceRoot would fall
+ * back to this checkout instead of the fixture. */
+const execFileAsync = promisify(execFile);
 
 async function removeWithRetry(targetPath) {
     for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -28,7 +35,7 @@ test("resolveWorkspaceRoot prefers the git repository root for nested directorie
     const nestedDir = path.join(repoDir, "src", "nested");
 
     await fs.mkdir(nestedDir, { recursive: true });
-    await execFile("git", ["-C", repoDir, "init", "--initial-branch=main"]);
+    await execFileAsync("git", ["-C", repoDir, "init", "--initial-branch=main"]);
 
     const previousCwd = process.cwd();
     process.chdir(nestedDir);
