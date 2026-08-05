@@ -1,6 +1,7 @@
 /* Resolution of the three reading sources the canvas offers.
  *
  *   session   — Markdown produced during this session:
+ *               the document set the agent asked the reader to review +
  *               host artifacts (plan.md, files/**) + agent-written files +
  *               inline documents pushed through the `show_markdown` action.
  *   workspace — the session workspace root, browsed as a SkimDown folder tree.
@@ -89,6 +90,16 @@ async function listSessionSource(ctx) {
     const registry = await loadRegistry(ctx.sessionId);
     const artifactsRoot = sessionArtifactsDir(ctx.sessionId);
 
+    const setEntries = await resolveDocSetEntries(ctx, registry);
+    // A set member must not reappear in another group, or the same document
+    // would be listed twice.
+    const setPaths = new Set(
+        setEntries.filter((entry) => entry.type === "file").map((entry) => entry.path.toLowerCase()),
+    );
+    const setInlineIds = new Set(
+        setEntries.filter((entry) => entry.type === "inline").map((entry) => entry.id),
+    );
+
     const artifactFiles = await scan(artifactsRoot);
     const allArtifacts = artifactFiles
         .map((file) => ({
@@ -104,15 +115,20 @@ async function listSessionSource(ctx) {
         }))
         .sort((a, b) => b.mtimeMs - a.mtimeMs);
 
-    const artifactEntries = allArtifacts.filter((entry) => entry.kind === "artifact");
-    const checkpointEntries = allArtifacts.filter((entry) => entry.kind === "checkpoint");
+    const artifactEntries = allArtifacts.filter(
+        (entry) => entry.kind === "artifact" && !setPaths.has(entry.path.toLowerCase()),
+    );
+    const checkpointEntries = allArtifacts.filter(
+        (entry) => entry.kind === "checkpoint" && !setPaths.has(entry.path.toLowerCase()),
+    );
 
     // Artifact paths must not reappear in the touched group, or the same
     // document would be listed twice.
     const artifactPaths = new Set(allArtifacts.map((entry) => entry.path.toLowerCase()));
     const touchedEntries = [];
     for (const entry of registry.touchedFiles) {
-        if (artifactPaths.has(entry.path.toLowerCase())) continue;
+        const lower = entry.path.toLowerCase();
+        if (artifactPaths.has(lower) || setPaths.has(lower)) continue;
         const meta = await statSafe(entry.path);
         if (!meta || !meta.isFile()) continue;
         touchedEntries.push({
@@ -128,17 +144,25 @@ async function listSessionSource(ctx) {
     }
     touchedEntries.sort((a, b) => b.touchedAt - a.touchedAt);
 
-    const inlineEntries = registry.inlineDocs.map((doc) => ({
-        type: "inline",
-        kind: "inline",
-        id: doc.id,
-        name: doc.title,
-        relPath: doc.id,
-        folder: "",
-        mtimeMs: doc.updatedAt,
-    }));
+    const inlineEntries = registry.inlineDocs
+        .filter((doc) => !setInlineIds.has(doc.id))
+        .map((doc) => ({
+            type: "inline",
+            kind: "inline",
+            id: doc.id,
+            name: doc.title,
+            relPath: doc.id,
+            folder: "",
+            mtimeMs: doc.updatedAt,
+        }));
 
     const groups = [
+        {
+            id: "set",
+            label: registry.docSet ? registry.docSet.title : "",
+            entries: setEntries,
+            showTime: false,
+        },
         { id: "inline", label: "Markdown displayed by the agent", entries: inlineEntries },
         { id: "artifact", label: "Session artifacts", entries: artifactEntries },
         { id: "touched", label: "Files edited in this session", entries: touchedEntries },
@@ -156,6 +180,48 @@ async function listSessionSource(ctx) {
         artifactsRoot,
         count,
     };
+}
+
+/**
+ * Resolve the session's document set into sidebar entries, in the order the
+ * agent supplied. Members whose file disappeared or whose inline body was
+ * evicted are dropped so the sidebar and the reading order stay in step.
+ */
+export async function resolveDocSetEntries(ctx, registry) {
+    const current = registry || (await loadRegistry(ctx.sessionId));
+    const docSet = current.docSet;
+    if (!docSet) return [];
+
+    const entries = [];
+    for (const item of docSet.items) {
+        if (item.kind === "inline") {
+            const doc = current.inlineDocs.find((candidate) => candidate.id === item.id);
+            if (!doc) continue;
+            entries.push({
+                type: "inline",
+                kind: "set",
+                id: doc.id,
+                name: item.title || doc.title,
+                relPath: doc.id,
+                folder: item.description,
+                mtimeMs: doc.updatedAt,
+            });
+            continue;
+        }
+
+        const meta = await statSafe(item.path);
+        if (!meta || !meta.isFile() || !isMarkdownFile(item.path)) continue;
+        entries.push({
+            type: "file",
+            kind: "set",
+            name: item.title || path.basename(item.path),
+            path: item.path,
+            relPath: relativeToWorkspace(ctx.workspacePath, item.path),
+            folder: item.description || folderLabel(ctx.workspacePath, item.path),
+            mtimeMs: meta.mtimeMs,
+        });
+    }
+    return entries;
 }
 
 function relativeToWorkspace(workspacePath, target) {

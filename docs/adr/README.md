@@ -55,3 +55,4 @@ ADR は、SkimDown canvas 拡張の**全体アーキテクチャに関する判�
 | [0010](0010-make-session-history-persistence-explicit-and-expiring.md) | Accepted | セッション履歴を既定でメモリだけに置き、許可された永続履歴へ期限と消去を必須化する |
 | [0011](0011-store-oversized-vendored-assets-as-verified-chunks.md) | Accepted | インストーラーの上限を超える vendored 資産をチャンクとして同梱し、配信時に結合する |
 | [0012](0012-inject-user-turns-from-the-reader.md) | Accepted | 読み手の指示を、ユーザー操作に限ってセッションへ注入する |
+| [0013](0013-present-agent-output-as-one-ordered-document-set.md) | Accepted | エージェントの成果物を、順序付きのドキュメントセット 1 つとして提示する |

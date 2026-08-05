@@ -41,6 +41,10 @@
         btnToggleToc: document.getElementById("btn-toggle-toc"),
         docTitle: document.getElementById("doc-title"),
         docSubtitle: document.getElementById("doc-subtitle"),
+        setNav: document.getElementById("set-nav"),
+        setPosition: document.getElementById("set-position"),
+        btnSetPrev: document.getElementById("btn-set-prev"),
+        btnSetNext: document.getElementById("btn-set-next"),
         btnOpenBrowser: document.getElementById("btn-open-browser"),
         btnAsk: document.getElementById("btn-ask"),
         btnFind: document.getElementById("btn-find"),
@@ -903,6 +907,34 @@
         syncExpandedRoot(payload);
         renderSources(payload);
         renderSidebar();
+        renderSetNav(payload.selection && payload.selection.set ? payload.selection.set : null);
+    }
+
+    // ---------- document set navigation ----------
+
+    function renderSetNav(set) {
+        var count = set && Number(set.count) > 0 ? Number(set.count) : 0;
+        if (!count) {
+            el.setNav.hidden = true;
+            el.setPosition.textContent = "";
+            el.setNav.removeAttribute("title");
+            return;
+        }
+        var index = Number(set.index);
+        // A negative index means the reader stepped out of the set. Both
+        // directions stay live because either one re-enters it.
+        var inSet = Number.isFinite(index) && index >= 0;
+        el.setNav.hidden = false;
+        el.setNav.title = set.title ? set.title : "";
+        el.setPosition.textContent = (inSet ? index + 1 : "-") + "/" + count;
+        el.btnSetPrev.disabled = inSet && index <= 0;
+        el.btnSetNext.disabled = inSet && index >= count - 1;
+    }
+
+    function stepSet(delta) {
+        api("/api/set/step", { delta: delta }).catch(function (err) {
+            showToast(err && err.message ? err.message : "Could not move within the set.");
+        });
     }
 
     function syncExpandedRoot(payload) {
@@ -1070,7 +1102,10 @@
             label.className = "group-label";
             label.textContent = group.label;
             container.appendChild(label);
-            renderFlatList(entries, container, { showFolder: true, showTime: true });
+            renderFlatList(entries, container, {
+                showFolder: true,
+                showTime: group.showTime !== false,
+            });
         });
     }
 
@@ -1529,6 +1564,12 @@
             case "ask":
                 openAskBar();
                 break;
+            case "set-prev":
+                if (!el.btnSetPrev.disabled) stepSet(-1);
+                break;
+            case "set-next":
+                if (!el.btnSetNext.disabled) stepSet(1);
+                break;
             default:
                 break;
         }
@@ -1542,6 +1583,8 @@
         if (key === "0" && !ev.shiftKey) return "zoom-reset";
         if (key === "]") return "content-width-wider";
         if (key === "[") return "content-width-narrower";
+        if (key === "PageUp") return "set-prev";
+        if (key === "PageDown") return "set-next";
 
         var lower = key.toLowerCase();
         if (ev.shiftKey) return lower === "g" ? "find-prev" : null;
@@ -2014,6 +2057,14 @@
 
     el.btnWidth.addEventListener("click", function () {
         stepWidth(1);
+    });
+
+    el.btnSetPrev.addEventListener("click", function () {
+        stepSet(-1);
+    });
+
+    el.btnSetNext.addEventListener("click", function () {
+        stepSet(1);
     });
 
     el.btnLinkOpen.addEventListener("click", function () {

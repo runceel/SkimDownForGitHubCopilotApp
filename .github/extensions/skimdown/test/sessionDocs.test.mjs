@@ -339,6 +339,7 @@ test("current and all-history deletion remove body and metadata", async () => {
     assert.deepEqual(await loadRegistry(current), {
         inlineDocs: [],
         touchedFiles: [],
+        docSet: null,
         lastSelection: null,
         lastRoot: null,
     });

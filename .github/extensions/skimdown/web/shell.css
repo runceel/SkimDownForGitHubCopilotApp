@@ -305,6 +305,28 @@ body[data-sidebar-position="right"] #sidebar {
     gap: 2px;
 }
 
+.set-nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-right: 4px;
+    padding-right: 6px;
+    border-right: 1px solid var(--border-color-default, var(--shell-border));
+}
+
+.set-nav[hidden] {
+    display: none;
+}
+
+.set-position {
+    min-width: 3.5ch;
+    color: var(--text-color-muted, var(--shell-muted));
+    font-size: 0.82em;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    white-space: nowrap;
+}
+
 .icon-button {
     display: inline-flex;
     align-items: center;
@@ -335,12 +357,12 @@ body[data-sidebar-position="right"] #sidebar {
     background: var(--true-color-blue-muted, var(--shell-accent-strong));
 }
 
-#btn-toggle-toc:disabled {
-    opacity: 0.5;
+.icon-button:disabled {
+    opacity: 0.4;
     cursor: default;
 }
 
-#btn-toggle-toc:disabled:hover {
+.icon-button:disabled:hover {
     background: transparent;
 }
 

@@ -24,6 +24,8 @@
             <symbol id="i-close" viewBox="0 0 16 16"><path d="M3.72 2.66 8 6.94l4.28-4.28 1.06 1.06L9.06 8l4.28 4.28-1.06 1.06L8 9.06l-4.28 4.28-1.06-1.06L6.94 8 2.66 3.72Z"/></symbol>
             <symbol id="i-up" viewBox="0 0 16 16"><path d="m8 4.5 5 5-1.06 1.06L8 6.62 4.06 10.56 3 9.5Z"/></symbol>
             <symbol id="i-down" viewBox="0 0 16 16"><path d="m8 11.5-5-5 1.06-1.06L8 9.38l3.94-3.94L13 6.5Z"/></symbol>
+            <symbol id="i-prev" viewBox="0 0 16 16"><path d="M4.5 8 9.5 13 10.56 11.94 6.62 8 10.56 4.06 9.5 3Z"/></symbol>
+            <symbol id="i-next" viewBox="0 0 16 16"><path d="M11.5 8 6.5 13 5.44 11.94 9.38 8 5.44 4.06 6.5 3Z"/></symbol>
             <symbol id="i-toc" viewBox="0 0 16 16"><path d="M1.5 2.5h2v2h-2Zm4 0H15V4H5.5Zm-4 4.5h2v2h-2Zm4 0H15v1.5H5.5Zm-4 4.5h2v2h-2Zm4 0H15V13H5.5Z"/></symbol>
             <symbol id="i-ask" viewBox="0 0 16 16"><path d="M2 1h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H7l-4 3v-3H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2Z"/></symbol>
         </defs>
@@ -82,6 +84,15 @@
                     <div id="doc-subtitle"></div>
                 </div>
                 <div class="toolbar-actions">
+                    <div id="set-nav" class="set-nav" hidden>
+                        <button type="button" class="icon-button" id="btn-set-prev" title="Previous document in the set (Ctrl+PageUp)" aria-label="Previous document in the set">
+                            <svg aria-hidden="true"><use href="#i-prev" /></svg>
+                        </button>
+                        <span class="set-position" id="set-position" aria-live="polite"></span>
+                        <button type="button" class="icon-button" id="btn-set-next" title="Next document in the set (Ctrl+PageDown)" aria-label="Next document in the set">
+                            <svg aria-hidden="true"><use href="#i-next" /></svg>
+                        </button>
+                    </div>
                     <button type="button" class="icon-button" id="btn-open-browser" title="Open in default browser" aria-label="Open in default browser">
                         <svg aria-hidden="true"><use href="#i-external" /></svg>
                     </button>
