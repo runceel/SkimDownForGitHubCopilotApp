@@ -17,6 +17,21 @@ import {
 import { appendDiag, diagArchiveFile, diagFile } from "../lib/paths.mjs";
 import { createInstance } from "../lib/server.mjs";
 
+async function removeWithRetry(targetPath) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+            await rm(targetPath, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            if (error?.code !== "ENOTEMPTY" && error?.code !== "EBUSY") {
+                throw error;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+    }
+    await rm(targetPath, { recursive: true, force: true });
+}
+
 test("diagnostic schema accepts known fields and rejects arbitrary data", () => {
     const diagnostic = validateDiagnostic({
         from: "shell",
@@ -187,7 +202,7 @@ test("diagnostic API enforces capability, content, size, schema, and rate limits
         await instance?.dispose();
         if (previousHome === undefined) delete process.env.COPILOT_HOME;
         else process.env.COPILOT_HOME = previousHome;
-        await rm(home, { recursive: true, force: true });
+        await removeWithRetry(home);
     }
 });
 
@@ -239,7 +254,7 @@ test("diagnostic persistence stays bounded across concurrent processes", async (
         assert.ok(archiveSize <= DIAG_SEGMENT_MAX_BYTES);
         assert.ok(currentSize + archiveSize <= DIAG_SEGMENT_MAX_BYTES * 2);
     } finally {
-        await rm(home, { recursive: true, force: true });
+        await removeWithRetry(home);
     }
 });
 
