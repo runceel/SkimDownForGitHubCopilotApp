@@ -9,6 +9,7 @@
 import { homedir } from "node:os";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -333,6 +334,9 @@ export async function resolveWorkspaceRoot(reported) {
 }
 
 async function findGitRoot(start) {
+    const gitRoot = await findGitRootViaGit(start);
+    if (gitRoot) return gitRoot;
+
     let current = start;
     for (let depth = 0; depth < 24; depth += 1) {
         try {
@@ -344,6 +348,26 @@ async function findGitRoot(start) {
         const parent = path.dirname(current);
         if (parent === current) return null;
         current = parent;
+    }
+    return null;
+}
+
+async function findGitRootViaGit(start) {
+    try {
+        const { stdout } = await new Promise((resolve, reject) => {
+            execFile("git", ["-C", start, "rev-parse", "--show-toplevel"], {
+                windowsHide: true,
+                maxBuffer: 1024 * 1024,
+            }, (error, stdout) => {
+                if (error) reject(error);
+                else resolve({ stdout });
+            });
+        });
+        const trimmed = stdout?.trim();
+        if (trimmed) return path.resolve(trimmed);
+    } catch {
+        // Fall back to the existing filesystem-based discovery when Git is
+        // unavailable or the path is not a repository.
     }
     return null;
 }

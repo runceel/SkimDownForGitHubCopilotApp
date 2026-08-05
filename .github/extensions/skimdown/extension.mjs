@@ -49,9 +49,13 @@ function log(message) {
     // stdout is the JSON-RPC channel, so console.log would corrupt the
     // protocol. Everything user-facing goes through session.log.
     try {
-        session?.log?.(message, { level: "debug", ephemeral: true });
+        session?.log?.(message, { level: "info", ephemeral: true });
     } catch {
-        // Logging must never break the canvas.
+        try {
+            session?.log?.(message, { ephemeral: true });
+        } catch {
+            // Logging must never break the canvas.
+        }
     }
 }
 
