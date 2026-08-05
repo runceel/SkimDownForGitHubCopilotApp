@@ -36,11 +36,13 @@ import {
 import {
     loadRegistry,
     getInlineDoc,
+    setDocumentSet,
     rememberSelection,
     clearSessionHistory,
     clearAllSessionHistory,
     updateSessionPrivacySettings,
     registryEvents,
+    DOC_SET_LIMITS,
 } from "./sessionDocs.mjs";
 import {
     sessionArtifactsDir,
@@ -196,14 +198,19 @@ export async function createInstance(ctx) {
         void handleFilesystemChange();
     });
 
+    // Registry changes are announced synchronously, so the follow-up work is
+    // tracked to let `dispose` wait for it instead of racing teardown.
+    let registryWork = Promise.resolve();
     const onRegistryChanged = (sessionId, change) => {
         if (sessionId !== ctx.sessionId) return;
-        void (async () => {
+        registryWork = registryWork.then(async () => {
             if (change?.kind === "cleared") {
                 await reconcileHistoryClear({ push: true });
             }
             if (state.source === SOURCE_SESSION) await refreshListing({ push: true });
-        })();
+        }).catch((error) => {
+            ctx.log?.(`skimdown registry refresh failed: ${error?.message || error}`);
+        });
     };
     registryEvents.on("changed", onRegistryChanged);
 
@@ -315,6 +322,7 @@ export async function createInstance(ctx) {
             sessionId: ctx.sessionId,
             workspacePath: state.workspacePath,
         });
+        const set = docSetPosition();
         return {
             instanceId: state.instanceId,
             sessionId: state.sessionId,
@@ -322,12 +330,128 @@ export async function createInstance(ctx) {
             source: state.source,
             root: state.root,
             listing: state.listing,
-            selection: state.selection,
+            selection: state.selection ? { ...state.selection, set } : state.selection,
             settings,
             sources,
             notice: state.notice,
             contentBaseUri,
             rendererBaseUri,
+        };
+    }
+
+    /** Entries of the document set, as the sidebar currently shows them. */
+    function docSetEntries() {
+        const group = (state.listing?.groups || []).find((item) => item.id === "set");
+        return group ? { label: group.label, entries: group.entries } : null;
+    }
+
+    function isSelectedEntry(entry) {
+        const selection = state.selection;
+        if (!selection) return false;
+        if (entry.type === "inline") {
+            return selection.kind === "inline" && selection.id === entry.id;
+        }
+        if (selection.kind !== "file") return false;
+        return canonicalPath(entry.path).toLowerCase() === selection.path.toLowerCase();
+    }
+
+    /** Where the open document sits in the set, or null when there is no set. */
+    function docSetPosition() {
+        const group = docSetEntries();
+        if (!group || group.entries.length === 0) return null;
+        return {
+            title: group.label,
+            index: group.entries.findIndex((entry) => isSelectedEntry(entry)),
+            count: group.entries.length,
+        };
+    }
+
+    /**
+     * Move to the neighbouring document of the set. The target is resolved from
+     * the instance's own listing, never from a client supplied path.
+     */
+    async function stepDocumentSet(delta) {
+        const group = docSetEntries();
+        if (!group || group.entries.length === 0) return { moved: false };
+
+        const current = group.entries.findIndex((entry) => isSelectedEntry(entry));
+        const next = current < 0 ? (delta > 0 ? 0 : group.entries.length - 1) : current + delta;
+        if (next < 0 || next >= group.entries.length) return { moved: false };
+
+        const entry = group.entries[next];
+        if (entry.type === "inline") await selectInline(entry.id);
+        else await selectFile(entry.path);
+        return { moved: true, index: next, count: group.entries.length };
+    }
+
+    /**
+     * Replace the session's document set and show its first document. File
+     * members are validated here so one bad path cannot discard the whole set.
+     */
+    async function presentDocumentSet({ id, title, documents } = {}) {
+        const requested = Array.isArray(documents)
+            ? documents.slice(0, DOC_SET_LIMITS.maxItems)
+            : [];
+        const items = [];
+        const skipped = [];
+
+        for (const entry of requested) {
+            if (!entry || typeof entry !== "object") {
+                skipped.push({ path: "", reason: "invalid" });
+                continue;
+            }
+            if (typeof entry.markdown === "string") {
+                items.push({
+                    markdown: entry.markdown,
+                    title: entry.title,
+                    description: entry.description,
+                });
+                continue;
+            }
+            const target = typeof entry.path === "string" ? entry.path : "";
+            const classified = await classifyPath(target, state.workspacePath);
+            if (classified.kind !== "file") {
+                skipped.push({ path: classified.path || target, reason: classified.kind });
+                continue;
+            }
+            approveTarget(classified);
+            items.push({
+                path: classified.path,
+                title: entry.title,
+                description: entry.description,
+            });
+        }
+
+        if (items.length === 0) {
+            const error = new Error("No readable Markdown was supplied for the document set.");
+            error.code = "invalid_request";
+            throw error;
+        }
+
+        const docSet = await setDocumentSet(ctx.sessionId, { id, title, items });
+        state.source = SOURCE_SESSION;
+        state.root = null;
+        state.notice = null;
+        await updateSettings({ lastSource: SOURCE_SESSION });
+        await refreshListing();
+
+        const group = docSetEntries();
+        const first = group?.entries[0];
+        if (first?.type === "inline") await selectInline(first.id, { push: false });
+        else if (first) await selectFile(first.path, { push: false });
+
+        broadcast("state", await buildState());
+        if (state.doc) broadcast("doc", publicDoc());
+        else broadcast("empty", {});
+
+        return {
+            id: docSet?.id || "",
+            title: docSet?.title || "",
+            count: group?.entries.length ?? 0,
+            documents: (group?.entries || []).map((entry) => (entry.type === "inline"
+                ? { kind: "inline", id: entry.id, title: entry.name }
+                : { kind: "file", path: entry.path, title: entry.name })),
+            skipped,
         };
     }
 
@@ -853,6 +977,10 @@ export async function createInstance(ctx) {
                 await refreshListing({ push: true });
                 return sendJson(res, 200, { ok: true, count: state.listing?.count ?? 0 });
             }
+            case "/api/set/step": {
+                const delta = Number(body.delta) < 0 ? -1 : 1;
+                return sendJson(res, 200, { ok: true, ...(await stepDocumentSet(delta)) });
+            }
             case "/api/settings": {
                 const privacyRequested =
                     Object.hasOwn(body || {}, "persistSessionHistory")
@@ -1102,6 +1230,9 @@ export async function createInstance(ctx) {
         registryEvents.off("changed", onRegistryChanged);
         clearInterval(historyReconcileTimer);
         watcher.dispose();
+        // Registry work touches session state on disk, so it has to finish
+        // before the caller is free to tear that state down.
+        await registryWork;
         for (const client of sseClients) {
             try {
                 client.end();
@@ -1164,6 +1295,8 @@ export async function createInstance(ctx) {
             await refreshListing();
             return selectInline(id);
         },
+        presentDocumentSet,
+        stepDocumentSet,
         /** Listing for an arbitrary source, without changing what the panel shows. */
         async previewSource(source) {
             const root = source === SOURCE_PATH ? state.root : undefined;

@@ -24,9 +24,17 @@ import {
 const MAX_INLINE_DOCS = 50;
 const MAX_TOUCHED_FILES = 300;
 const MAX_INLINE_BYTES = 2 * 1024 * 1024;
+const MAX_SET_ITEMS = 25;
+const DEFAULT_SET_ID = "set";
+const DEFAULT_SET_TITLE = "Documents to review";
 const REGISTRY_SCHEMA_VERSION = 2;
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const DOC_SET_LIMITS = Object.freeze({
+    maxItems: MAX_SET_ITEMS,
+    maxInlineBytes: MAX_INLINE_BYTES,
+});
 
 export const registryEvents = new EventEmitter();
 
@@ -173,13 +181,16 @@ export async function addInlineDoc(sessionId, { markdown, title, id }) {
                 : deriveTitle(text) || `Markdown ${docId}`;
 
         const existingIndex = current.inlineDocs.findIndex((doc) => doc.id === docId);
+        const existing = existingIndex >= 0 ? current.inlineDocs[existingIndex] : null;
         const doc = {
             id: docId,
             title: cleanTitle,
             markdown: text,
-            createdAt: existingIndex >= 0 ? current.inlineDocs[existingIndex].createdAt : now,
+            createdAt: existing ? existing.createdAt : now,
             updatedAt: now,
         };
+        // Keep an existing document inside its set when the agent rewrites it.
+        if (existing && typeof existing.setId === "string") doc.setId = existing.setId;
 
         const inlineDocs = [...current.inlineDocs];
         if (existingIndex >= 0) inlineDocs.splice(existingIndex, 1);
@@ -187,10 +198,90 @@ export async function addInlineDoc(sessionId, { markdown, title, id }) {
 
         await persist(sessionId, {
             ...current,
-            inlineDocs: inlineDocs.slice(0, MAX_INLINE_DOCS),
+            inlineDocs: limitInlineDocs(inlineDocs, current.docSet),
         });
         return doc;
     });
+}
+
+/**
+ * Replace the session's document set with an ordered, named collection.
+ *
+ * Inline bodies are stored as ordinary inline documents tagged with the set id
+ * so they reuse the existing size caps, persistence, and clearing paths. The
+ * previous set's inline bodies are dropped, because only one set exists at a
+ * time.
+ */
+export async function setDocumentSet(sessionId, { id, title, items } = {}) {
+    return withStateLock(async () => {
+        const current = await loadRegistry(sessionId, { fresh: true });
+        const now = Date.now();
+        const setId = normalizeInlineId(id) || DEFAULT_SET_ID;
+        const kept = current.inlineDocs.filter((doc) => typeof doc.setId !== "string");
+        const usedIds = new Set(kept.map((doc) => doc.id));
+
+        const created = [];
+        const setItems = [];
+        let counter = 0;
+        for (const item of Array.isArray(items) ? items.slice(0, MAX_SET_ITEMS) : []) {
+            if (!item || typeof item !== "object") continue;
+            const itemTitle = cleanText(item.title, 200);
+            const description = cleanText(item.description, 200);
+
+            if (typeof item.markdown === "string") {
+                const text = item.markdown.slice(0, MAX_INLINE_BYTES);
+                let docId = normalizeInlineId(item.id);
+                if (!docId || usedIds.has(docId)) {
+                    do {
+                        docId = `${setId}-${++counter}`;
+                    } while (usedIds.has(docId));
+                }
+                usedIds.add(docId);
+                created.push({
+                    id: docId,
+                    title: itemTitle || deriveTitle(text) || `Markdown ${docId}`,
+                    markdown: text,
+                    createdAt: now,
+                    updatedAt: now,
+                    setId,
+                });
+                setItems.push({ kind: "inline", id: docId, title: itemTitle, description });
+                continue;
+            }
+
+            if (typeof item.path === "string" && item.path.length > 0) {
+                setItems.push({
+                    kind: "file",
+                    path: path.resolve(item.path),
+                    title: itemTitle,
+                    description,
+                });
+            }
+        }
+
+        const docSet = setItems.length > 0
+            ? {
+                id: setId,
+                title: cleanText(title, 200) || DEFAULT_SET_TITLE,
+                // A set is always replaced whole, so it is never partly older.
+                createdAt: now,
+                updatedAt: now,
+                items: setItems,
+            }
+            : null;
+
+        await persist(sessionId, {
+            ...current,
+            inlineDocs: limitInlineDocs([...created, ...kept], docSet),
+            docSet,
+        });
+        return docSet;
+    });
+}
+
+export async function getDocumentSet(sessionId) {
+    const current = await loadRegistry(sessionId);
+    return current.docSet;
 }
 
 export async function getInlineDoc(sessionId, id) {
@@ -450,6 +541,27 @@ function normalizeInlineId(id) {
     return clean.length > 0 ? clean : null;
 }
 
+function cleanText(value, limit) {
+    if (typeof value !== "string") return "";
+    return value.trim().slice(0, limit);
+}
+
+/** Keep every body the document set references, then the newest of the rest. */
+function limitInlineDocs(docs, docSet) {
+    if (docs.length <= MAX_INLINE_DOCS) return docs;
+    const pinned = new Set(
+        (docSet?.items || [])
+            .filter((item) => item.kind === "inline")
+            .map((item) => item.id),
+    );
+    const result = docs.filter((doc) => pinned.has(doc.id));
+    for (const doc of docs) {
+        if (result.length >= MAX_INLINE_DOCS) break;
+        if (!pinned.has(doc.id)) result.push(doc);
+    }
+    return result.slice(0, MAX_INLINE_DOCS);
+}
+
 function nextInlineId(current) {
     const ids = new Set(current.inlineDocs.map((doc) => doc.id));
     let id;
@@ -473,6 +585,7 @@ function createDefaultRegistry() {
     return {
         inlineDocs: [],
         touchedFiles: [],
+        docSet: null,
         lastSelection: null,
         lastRoot: null,
     };
@@ -504,11 +617,42 @@ function normalize(value) {
         touchedFiles: Array.isArray(value.touchedFiles)
             ? value.touchedFiles.filter((entry) => entry && typeof entry.path === "string")
             : [],
+        docSet: normalizeDocSet(value.docSet),
         lastSelection: value.lastSelection && typeof value.lastSelection === "object"
             ? value.lastSelection
             : null,
         lastRoot: typeof value.lastRoot === "string" ? value.lastRoot : null,
     };
+}
+
+function normalizeDocSet(value) {
+    if (!value || typeof value !== "object") return null;
+    const items = Array.isArray(value.items)
+        ? value.items.map(normalizeDocSetItem).filter(Boolean).slice(0, MAX_SET_ITEMS)
+        : [];
+    if (items.length === 0) return null;
+    const now = Date.now();
+    return {
+        id: normalizeInlineId(value.id) || DEFAULT_SET_ID,
+        title: cleanText(value.title, 200) || DEFAULT_SET_TITLE,
+        createdAt: Number.isFinite(value.createdAt) ? value.createdAt : now,
+        updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : now,
+        items,
+    };
+}
+
+function normalizeDocSetItem(item) {
+    if (!item || typeof item !== "object") return null;
+    const title = cleanText(item.title, 200);
+    const description = cleanText(item.description, 200);
+    if (item.kind === "inline") {
+        const id = normalizeInlineId(item.id);
+        return id ? { kind: "inline", id, title, description } : null;
+    }
+    if (item.kind === "file" && typeof item.path === "string" && item.path.length > 0) {
+        return { kind: "file", path: path.resolve(item.path), title, description };
+    }
+    return null;
 }
 
 function mergeRegistries(memory, stored) {
@@ -520,13 +664,16 @@ function mergeRegistries(memory, stored) {
     const touchedPaths = new Set(touchedFiles.map((entry) => entry.path));
     touchedFiles.push(...stored.touchedFiles.filter((entry) => !touchedPaths.has(entry.path)));
 
+    const docSet = memory.docSet || stored.docSet;
     return {
-        inlineDocs: inlineDocs
-            .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-            .slice(0, MAX_INLINE_DOCS),
+        inlineDocs: limitInlineDocs(
+            inlineDocs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+            docSet,
+        ),
         touchedFiles: touchedFiles
             .sort((a, b) => (b.at || 0) - (a.at || 0))
             .slice(0, MAX_TOUCHED_FILES),
+        docSet,
         lastSelection: memory.lastSelection || stored.lastSelection,
         lastRoot: memory.lastRoot || stored.lastRoot,
     };

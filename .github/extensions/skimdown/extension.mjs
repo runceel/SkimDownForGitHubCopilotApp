@@ -107,6 +107,12 @@ async function openCanvas(ctx) {
         });
         await instance.setSource(SOURCE_SESSION);
         await instance.showInline(doc.id);
+    } else if (Array.isArray(input.documents) && input.documents.length > 0) {
+        await instance.presentDocumentSet({
+            id: input.id,
+            title: input.title,
+            documents: input.documents,
+        });
     } else if (typeof input.path === "string" && input.path.trim().length > 0) {
         await instance.openTarget(input.path, { approve: true });
     } else if (typeof input.source === "string") {
@@ -131,6 +137,26 @@ function statusFor(instance) {
     return `${listing.rootLabel} · ${listing.count} ${listing.count === 1 ? "item" : "items"}`;
 }
 
+const DOCUMENT_SET_ITEM_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+        path: {
+            type: "string",
+            description: "Absolute path to an existing Markdown file. Use this or `markdown`.",
+        },
+        markdown: {
+            type: "string",
+            description: "Markdown text to show without writing a file. Use this or `path`.",
+        },
+        title: { type: "string", description: "Optional label shown in the sidebar." },
+        description: {
+            type: "string",
+            description: "Optional one-line note shown under the title, such as why it matters.",
+        },
+    },
+};
+
 const canvas = createCanvas({
     id: "skimdown",
     displayName: "SkimDown",
@@ -148,9 +174,18 @@ const canvas = createCanvas({
                 type: "string",
                 description: "Markdown text to display immediately, without writing a file.",
             },
+            documents: {
+                type: "array",
+                minItems: 1,
+                maxItems: 25,
+                items: DOCUMENT_SET_ITEM_SCHEMA,
+                description:
+                    "An ordered set of Markdown documents to present for review, in reading order.",
+            },
             title: {
                 type: "string",
-                description: "Title for the inline Markdown supplied via `markdown`.",
+                description:
+                    "Title for the inline Markdown supplied via `markdown`, or the name of the `documents` set.",
             },
             id: {
                 type: "string",
@@ -197,6 +232,50 @@ const canvas = createCanvas({
                 await instance.setSource(SOURCE_SESSION);
                 await instance.showInline(doc.id);
                 return { id: doc.id, title: doc.title, characters: doc.markdown.length };
+            },
+        },
+        {
+            name: "show_markdown_set",
+            description:
+                "Present an ordered set of Markdown documents for the reader to review. Files and inline Markdown can be mixed, the set replaces any previous one, and the reader can step through it with previous/next.",
+            inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["documents"],
+                properties: {
+                    documents: {
+                        type: "array",
+                        minItems: 1,
+                        maxItems: 25,
+                        items: DOCUMENT_SET_ITEM_SCHEMA,
+                        description: "The documents to review, in reading order.",
+                    },
+                    title: {
+                        type: "string",
+                        description:
+                            "Optional name for the set, shown as the sidebar heading. Defaults to \"Documents to review\".",
+                    },
+                    id: {
+                        type: "string",
+                        description: "Optional stable id so repeated calls update the same set.",
+                    },
+                },
+            },
+            handler: async (ctx) => {
+                const instance = await getInstance(ctx.instanceId);
+                const input = ctx.input || {};
+                if (!Array.isArray(input.documents) || input.documents.length === 0) {
+                    throw new CanvasError("invalid_input", "`documents` must be a non-empty array.");
+                }
+                try {
+                    return await instance.presentDocumentSet({
+                        id: input.id,
+                        title: input.title,
+                        documents: input.documents,
+                    });
+                } catch (error) {
+                    throw new CanvasError(error?.code || "open_failed", error?.message || String(error));
+                }
             },
         },
         {
