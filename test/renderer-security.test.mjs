@@ -115,6 +115,40 @@ test("renderer publishes a hierarchical table of contents with stable duplicate 
     });
 });
 
+test("renderer displays leading YAML front matter as a metadata table", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+
+    const content = await renderer.render([
+        "---",
+        "title: SkimDown",
+        "tags:",
+        "  - markdown",
+        "  - preview",
+        "draft: false",
+        "---",
+        "",
+        "# Body",
+        "",
+        "---",
+    ].join("\n"));
+
+    assert.deepEqual(
+        [...content.querySelectorAll(".skimdown-frontmatter tr")].map((row) => [
+            row.querySelector("th").textContent,
+            row.querySelector("td").textContent,
+        ]),
+        [
+            ["title", "SkimDown"],
+            ["tags", "markdown\npreview"],
+            ["draft", "false"],
+        ],
+    );
+    assert.equal(content.firstElementChild.className, "skimdown-frontmatter");
+    assert.equal(content.querySelector("h1").textContent, "Body");
+    assert.equal(content.querySelectorAll("hr").length, 1);
+});
+
 test("renderer scrolls to a selected ToC heading and reports it as active", async (t) => {
     const renderer = await createRenderer();
     t.after(() => renderer.close());
