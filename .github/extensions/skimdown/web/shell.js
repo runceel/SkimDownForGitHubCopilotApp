@@ -39,6 +39,7 @@
         btnSwapSidebar: document.getElementById("btn-swap-sidebar"),
         btnToggleSidebar: document.getElementById("btn-toggle-sidebar"),
         btnToggleToc: document.getElementById("btn-toggle-toc"),
+        btnGitChanges: document.getElementById("btn-git-changes"),
         docTitle: document.getElementById("doc-title"),
         docSubtitle: document.getElementById("doc-subtitle"),
         setNav: document.getElementById("set-nav"),
@@ -139,6 +140,7 @@
         "select-all",
         "open-folder",
         "ask",
+        "git-changes",
     ]);
     var handshakeTimer = 0;
     var handshakePoll = 0;
@@ -468,6 +470,7 @@
             contentBaseUri: doc.contentBaseUri || "",
             remoteContentId: doc.remoteContentId || "",
             remoteContentToken: doc.remoteContentToken || "",
+            gitDiff: state.settings && state.settings.showGitChanges ? doc.gitDiff : null,
             theme: theme.theme,
             themeType: theme.themeType,
             themeIsDark: theme.themeIsDark,
@@ -744,6 +747,12 @@
         var muted = flatten(readResolved("--text-color-muted", toCss(mix(fg, bg, 0.65))), bg);
         var border = flatten(readResolved("--border-color-default", toCss(mix(fg, bg, 0.2))), bg);
         var link = flatten(readResolved("--true-color-blue", defaults.link), bg);
+        var gitAdded = toCss(flatten(readResolved("--true-color-green", dark ? "#3fb950" : "#1a7f37"), bg));
+        var gitModified = toCss(flatten(readResolved("--true-color-yellow", dark ? "#d29922" : "#9a6700"), bg));
+        var gitDeleted = toCss(flatten(readResolved("--true-color-red", dark ? "#f85149" : "#cf222e"), bg));
+        el.body.style.setProperty("--skim-git-added", gitAdded);
+        el.body.style.setProperty("--skim-git-modified", gitModified);
+        el.body.style.setProperty("--skim-git-deleted", gitDeleted);
 
         // A theme that resolves foreground and background to the same color
         // would render the document invisible; prefer the known-good defaults.
@@ -770,6 +779,9 @@
                 "--skim-code-bg": toCss(mix(fg, bg, 0.06)),
                 "--skim-table-stripe": toCss(mix(fg, bg, 0.035)),
                 "--skim-link": toCss(link),
+                "--skim-git-added": gitAdded,
+                "--skim-git-modified": gitModified,
+                "--skim-git-deleted": gitDeleted,
                 "--skim-mark-bg": dark ? "rgba(255, 212, 59, 0.4)" : "#fff5b1",
                 "--skim-mark-current-bg": dark ? "rgba(255, 212, 59, 0.8)" : "#ffd33d",
                 // The canvas panel is much narrower than a desktop window, so
@@ -907,6 +919,7 @@
         syncExpandedRoot(payload);
         renderSources(payload);
         renderSidebar();
+        if (payload.git && payload.git.error) showToast(payload.git.error);
         renderSetNav(payload.selection && payload.selection.set ? payload.selection.set : null);
     }
 
@@ -960,6 +973,8 @@
         el.sidebar.style.width = settings.sidebarWidth + "px";
         el.btnViewTree.setAttribute("aria-pressed", String(settings.viewMode === "tree"));
         el.btnViewRecent.setAttribute("aria-pressed", String(settings.viewMode === "recent"));
+        el.btnGitChanges.setAttribute("aria-pressed", String(settings.showGitChanges === true));
+        el.btnGitChanges.title = (settings.showGitChanges ? "Hide" : "Show") + " Git changes (Ctrl+Shift+D)";
         el.btnZoomReset.textContent = Math.round(settings.zoomFactor * 100) + "%";
         el.persistSessionHistory.checked = settings.persistSessionHistory === true;
         el.sessionRetentionDays.value = String(settings.sessionRetentionDays || 7);
@@ -986,7 +1001,7 @@
             settingsTimer = 0;
             var body = pendingSettings;
             pendingSettings = null;
-            if (body) api("/api/settings", body).catch(noop);
+            if (body) api("/api/settings", body).catch(showError);
         };
         if (immediate) send();
         else settingsTimer = setTimeout(send, 250);
@@ -1133,6 +1148,7 @@
             }
 
             button.title = entry.type === "inline" ? entry.name : entry.path || entry.relPath;
+            decorateGitNode(button, entry);
             bindNodeActivation(button, entry);
             container.appendChild(button);
             state.visibleNodes.push(button);
@@ -1161,6 +1177,7 @@
                 dirButton.appendChild(dirLabel);
 
                 dirButton.title = node.relPath;
+                decorateGitNode(dirButton, node);
                 dirButton.addEventListener("click", function () {
                     toggleDir(node.relPath);
                 });
@@ -1183,6 +1200,7 @@
             fileButton.appendChild(label);
 
             fileButton.title = node.path;
+            decorateGitNode(fileButton, node);
             bindNodeActivation(fileButton, node);
             container.appendChild(fileButton);
             state.visibleNodes.push(fileButton);
@@ -1199,6 +1217,29 @@
                 api("/api/select", { kind: "file", path: entry.path }).catch(showError);
             }
         });
+    }
+
+    function decorateGitNode(button, entry) {
+        if (!state.settings || !state.settings.showGitChanges || !state.server || !state.server.git) return;
+        var statuses = state.server.git.statuses || {};
+        var status = statuses[entry.path];
+        if (entry.type === "dir") {
+            var listingRoot = state.server.listing && state.server.listing.root;
+            if (!listingRoot) return;
+            var prefix = listingRoot.replace(/\\/g, "/").replace(/\/$/, "") + "/" + entry.relPath + "/";
+            Object.keys(statuses).forEach(function (file) {
+                if (file.replace(/\\/g, "/").indexOf(prefix) !== 0) return;
+                if (!status || statuses[file] === "M") status = statuses[file];
+            });
+        }
+        if (!["M", "U", "A"].includes(status)) return;
+        button.classList.add(status === "M" ? "git-modified" : "git-added");
+        var badge = document.createElement("span");
+        badge.className = "git-badge";
+        badge.textContent = entry.type === "dir" ? "\u25CF" : status;
+        badge.setAttribute("aria-label", entry.type === "dir" ? "Contains Git changes"
+            : { M: "Modified", U: "Untracked", A: "Added to index" }[status]);
+        button.appendChild(badge);
     }
 
     function toggleDir(relPath) {
@@ -1540,6 +1581,11 @@
             case "toggle-sidebar":
                 saveSettings({ sidebarVisible: !state.settings.sidebarVisible }, true);
                 break;
+            case "git-changes":
+                saveSettings({ showGitChanges: !state.settings.showGitChanges }, true);
+                renderSidebar();
+                if (state.doc) pushDocToRenderer(state.doc);
+                break;
             case "zoom-in":
                 stepZoom(1);
                 break;
@@ -1587,7 +1633,7 @@
         if (key === "PageDown") return "set-next";
 
         var lower = key.toLowerCase();
-        if (ev.shiftKey) return lower === "g" ? "find-prev" : null;
+        if (ev.shiftKey) return lower === "g" ? "find-prev" : lower === "d" ? "git-changes" : null;
         switch (lower) {
             case "o": return "open-folder";
             case "i": return "ask";
@@ -1952,6 +1998,10 @@
 
     el.btnToggleToc.addEventListener("click", function () {
         saveSettings({ tocVisible: state.settings.tocVisible === false }, true);
+    });
+
+    el.btnGitChanges.addEventListener("click", function () {
+        handleShortcut("git-changes");
     });
 
     el.btnCloseToc.addEventListener("click", function () {

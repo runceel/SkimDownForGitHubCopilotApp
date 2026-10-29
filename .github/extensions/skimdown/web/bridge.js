@@ -214,6 +214,12 @@
     // set of upstream shortcuts and knows nothing about this one, so it is
     // raised here and travels over the existing `shortcut` message.
     window.addEventListener("keydown", function (ev) {
+        if (ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey
+            && (ev.key || "").toLowerCase() === "d") {
+            ev.preventDefault();
+            post({ type: "shortcut", id: "git-changes" });
+            return;
+        }
         if (!ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey) return;
         if ((ev.key || "").toLowerCase() !== "i") return;
         ev.preventDefault();

@@ -328,7 +328,7 @@ const canvas = createCanvas({
             inputSchema: { type: "object", additionalProperties: false, properties: {} },
             handler: async (ctx) => {
                 const instance = await getInstance(ctx.instanceId);
-                const listing = await instance.refreshListing({ push: true });
+                const listing = await instance.refresh();
                 return { count: listing?.count ?? 0, root: listing?.root ?? null };
             },
         },

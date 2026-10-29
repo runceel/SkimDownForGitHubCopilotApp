@@ -1,0 +1,115 @@
+/* Git changes styles ported with the author's permission from 07JP27/SkimDown #59.
+ * See THIRD-PARTY-NOTICES.md. Colors and padded-content layout follow the canvas host. */
+/* --- Git changes --- */
+/* Bars live in one gutter column left of #content (laid out by renderer.js),
+   so they line up regardless of block type or nesting depth. */
+.skimdown-git-diff {
+  position: relative;
+}
+
+.skimdown-git-gutter {
+  position: absolute;
+  top: 0;
+  left: var(--skim-pad);
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.skimdown-git-gutter-bar {
+  position: absolute;
+  left: max(-16px, calc(var(--skim-pad) / -2));
+  width: 3px;
+  border-radius: 1.5px;
+  background: var(--skim-git-color);
+}
+
+.skimdown-git-gutter-added {
+  --skim-git-color: var(--skim-git-added);
+}
+
+.skimdown-git-gutter-modified {
+  --skim-git-color: var(--skim-git-modified);
+}
+
+.skimdown-git-gutter-deleted {
+  --skim-git-color: var(--skim-git-deleted);
+}
+
+.skimdown-git-added {
+  --skim-git-color: var(--skim-git-added);
+}
+
+.skimdown-git-modified {
+  --skim-git-color: var(--skim-git-modified);
+}
+
+:is(.skimdown-git-added, .skimdown-git-modified):where(:not(tr, pre, hr, .skim-mermaid-wrap)) {
+  border-radius: 2px;
+  background-color: color-mix(in srgb, var(--skim-git-color) 8%, transparent);
+}
+
+main.markdown-body pre:is(.skimdown-git-added, .skimdown-git-modified) {
+  background: color-mix(in srgb, var(--skim-git-color) 8%, var(--skim-code-bg));
+}
+
+main.markdown-body .skim-mermaid-wrap:is(.skimdown-git-added, .skimdown-git-modified) {
+  background: color-mix(in srgb, var(--skim-git-color) 8%, var(--skim-bg));
+}
+
+main.markdown-body hr:is(.skimdown-git-added, .skimdown-git-modified) {
+  background: var(--skim-git-color);
+}
+
+main.markdown-body tr:is(.skimdown-git-added, .skimdown-git-modified) > :is(th, td) {
+  background: color-mix(in srgb, var(--skim-git-color) 10%, transparent);
+}
+
+.skimdown-git-marker {
+  --skim-git-color: var(--skim-git-deleted);
+  margin: 0 0 0.6em;
+  padding: 0.2em 0.7em;
+  border: 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--skim-git-color) 8%, transparent);
+  font-size: 0.86em;
+}
+
+.skimdown-git-marker-modified {
+  --skim-git-color: var(--skim-git-modified);
+}
+
+.skimdown-git-marker > summary {
+  color: var(--skim-git-color);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+main.markdown-body .skimdown-git-previous {
+  margin: 0.4em 0 0.3em;
+  padding: 0.6em 0.8em;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--skim-git-deleted) 7%, var(--skim-code-bg));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Marker list items must not advance ordered-list numbering. */
+li.skimdown-git-marker-item {
+  display: block;
+  list-style: none;
+}
+
+tr.skimdown-git-marker-row > td {
+  padding: 4px 8px;
+  border-color: var(--skim-border);
+  background: transparent;
+}
+
+tr.skimdown-git-marker-row .skimdown-git-marker {
+  margin: 0;
+}

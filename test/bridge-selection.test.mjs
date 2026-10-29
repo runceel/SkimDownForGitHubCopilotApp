@@ -127,3 +127,14 @@ test("Ctrl+I is raised as an ask shortcut the upstream renderer does not know", 
     }
     assert.equal(bridge.payloads("shortcut").length, 1);
 });
+
+test("Ctrl+Shift+D toggles Git changes while the renderer has focus", (t) => {
+    const bridge = createBridge();
+    t.after(() => bridge.close());
+    const event = new bridge.window.KeyboardEvent("keydown", {
+        key: "D", ctrlKey: true, shiftKey: true, cancelable: true,
+    });
+    bridge.window.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+    assert.deepEqual(bridge.payloads("shortcut"), [{ type: "shortcut", id: "git-changes" }]);
+});

@@ -768,3 +768,6 @@ body[data-sidebar-position="right"] #sidebar {
     clip-path: inset(50%);
     white-space: nowrap;
 }
+.node.git-modified { color: var(--skim-git-modified, var(--text-color-default)); }
+.node.git-added { color: var(--skim-git-added, var(--text-color-default)); }
+.git-badge { margin-left: auto; padding-left: 8px; font-size: 0.85em; font-weight: 600; }
