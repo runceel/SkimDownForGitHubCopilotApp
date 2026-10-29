@@ -25,6 +25,8 @@
 | `.github/extensions/skimdown/extension.mjs` | canvas の登録、インスタンスのライフサイクル、アクション受付 |
 | `.github/extensions/skimdown/lib/` | loopback サーバー、ソース解決、Markdown 走査、セッション文書、設定、ファイル監視、診断、リモートコンテンツ |
 | `.github/extensions/skimdown/web/` | シェル（`shell.*`）、renderer（`renderer.*`）、ホスト互換シム（`bridge.js`）、`skimdown.css` |
+| `.github/extensions/skimdown/lib/gitChanges.mjs` | 安全な読み取り専用 Git plumbing と Git メタデータ監視 |
+| `.github/extensions/skimdown/web/gitDiff.*` | macOS 上流 #59 由来のブロック差分補助資産。ホストテーマ・既存 renderer へ適合 |
 | `.github/extensions/skimdown/web/vendor/` | vendored 実行資産。手で編集しない。インストーラーの 1 ファイル上限を超えるものは `<ファイル名>.NNN` のチャンクとして保管する |
 | `.github/extensions/skimdown/scripts/vendor-assets.mjs` | vendored 資産の `refresh` / `sbom` / `verify` / `restore` |
 | `.github/extensions/skimdown/test/` | 拡張プロセス側のテスト |
@@ -118,10 +120,11 @@ flowchart TB
 移植の前提は、レンダラーを原則として上流から同期することである。`renderer.js` が
 ホストへ触るのは `window.chrome.webview` の 2 か所だけだったため、`bridge.js` がそれを
 `postMessage` の上に再実装している。`skimdown.css` と `web/vendor/**` は
-SkimDown for Windows からのバイト単位のコピーで、`renderer.html` の差分は
-`<script src="bridge.js">` の 1 行だけである。`renderer.js` も同じ同期モデルに従うが、
+SkimDown for Windows からのバイト単位のコピーである。`renderer.html` は
+互換シムと差分補助資産を追加する。`renderer.js` も同じ同期モデルに従うが、
 安全な上流リビジョンを待てない脆弱性については、回帰テスト付きの最小限のローカル修正を
-許可し、上流へ反映された時点で再同期する。
+許可し、上流へ反映された時点で再同期する。Git 差分移植は `gitDiff.*` へ分離し、renderer の
+変更はトークン属性・描画・検索との接続に限定する（[ADR 0015](docs/adr/0015-port-opt-in-git-changes-through-read-only-plumbing.md)）。
 
 ローカル HTTP サーバーは、信頼済みシェル、信頼されない renderer、ローカル画像用コンテンツの
 3 つの loopback origin を分離する。本文中の相対画像はコンテンツ origin からのみ、しかも

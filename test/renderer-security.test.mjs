@@ -55,6 +55,7 @@ async function createRenderer({ loadPurify = true } = {}) {
 
     loadScript(window, "vendor/markdown-it.min.js");
     if (loadPurify) loadScript(window, "vendor/dompurify.min.js");
+    loadScript(window, "gitDiff.js");
     loadScript(window, "renderer.js");
 
     if (!listeners.length) {
@@ -74,6 +75,7 @@ async function createRenderer({ loadPurify = true } = {}) {
         async render(markdown, {
             remoteContentId = "a".repeat(64),
             remoteContentToken = "",
+            gitDiff = null,
         } = {}) {
             for (const listener of listeners) {
                 listener({
@@ -84,6 +86,7 @@ async function createRenderer({ loadPurify = true } = {}) {
                         contentBaseUri: "https://skimdown-content.example/",
                         remoteContentId,
                         remoteContentToken,
+                        gitDiff,
                         theme: "light",
                     },
                 });
@@ -147,6 +150,86 @@ test("renderer displays leading YAML front matter as a metadata table", async (t
     assert.equal(content.firstElementChild.className, "skimdown-frontmatter");
     assert.equal(content.querySelector("h1").textContent, "Body");
     assert.equal(content.querySelectorAll("hr").length, 1);
+});
+
+test("Git blocks reuse upstream grouping, safe previous-text markers, and search exclusion", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+    const markdown = "# Same\n\nNew paragraph.\n\n- changed item\n  - added nested\n\n| A |\n| - |\n| row |\n";
+    const content = await renderer.render(markdown, { gitDiff: { hunks: [
+        { newStart: 2, newCount: 1, oldLines: [] },
+        { newStart: 4, newCount: 1, oldLines: ["<script>previousOnly</script>"] },
+        { newStart: 5, newCount: 1, oldLines: [] },
+        { newStart: 9, newCount: 1, oldLines: ["| old row |"] },
+        { newStart: 10, newCount: 0, oldLines: ["# deletedOnly"] },
+    ] } });
+    assert.ok(content.querySelector("p.skimdown-git-added"));
+    assert.ok(content.querySelector("li.skimdown-git-modified"));
+    assert.ok(content.querySelector("li li.skimdown-git-added"));
+    assert.ok(content.querySelector("tr.skimdown-git-modified"));
+    assert.ok(content.querySelector("li.skimdown-git-marker-item > details"));
+    assert.ok(content.querySelector("tr.skimdown-git-marker-row > td > details"));
+    assert.ok(content.querySelector(".skimdown-git-marker-deleted"));
+    assert.match(content.querySelector(".skimdown-git-previous").textContent, /<script>previousOnly<\/script>/);
+    assert.equal(content.querySelector(".skimdown-git-previous script"), null);
+    assert.equal(content.querySelector(".skimdown-git-previous h1"), null);
+    assert.equal(content.querySelectorAll(".skimdown-git-gutter").length, 1);
+    const toc = renderer.messages.findLast((message) => message.type === "toc");
+    assert.deepEqual(plain(toc.headings.map((heading) => heading.title)), ["Same"]);
+    await renderer.send({ type: "search", query: "previousOnly", caseSensitive: false });
+    assert.equal(renderer.messages.findLast((message) => message.type === "search/result").total, 0);
+    await renderer.render(markdown);
+    assert.equal(content.querySelector("[class*='skimdown-git-']"), null);
+    assert.equal(content.classList.contains("skimdown-git-diff"), false);
+});
+
+test("Git highlights front matter, fenced diagrams/math, code, HTML, and rules", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+    const markdown = "---\ntitle: New\n---\n\n```mermaid\ngraph TD; A-->B\n```\n\n```math\nx=1\n```\n\n```js\nlet x=1\n```\n\n<div>HTML</div>\n\n---\n";
+    const content = await renderer.render(markdown, { gitDiff: { hunks: [
+        { newStart: 0, newCount: 20, oldLines: [] },
+    ] } });
+    for (const selector of [
+        ".skimdown-frontmatter", ".skim-mermaid-wrap", ".skim-math-block",
+        ".skim-code pre", "div.skimdown-git-added", "hr",
+    ]) {
+        assert.ok(content.querySelector(selector)?.classList.contains("skimdown-git-added"), selector);
+    }
+});
+
+test("Git run IDs join consecutive equal states and split at unchanged blocks and deletions", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+    const content = await renderer.render("# First\n\nSecond.\n\nSame.\n\nThird.\n", { gitDiff: { hunks: [
+        { newStart: 0, newCount: 3, oldLines: [] },
+        { newStart: 6, newCount: 1, oldLines: [] },
+        { newStart: 6, newCount: 0, oldLines: ["deleted"] },
+    ] } });
+    const run = (element) => [...element.classList].find((name) => name.startsWith("skimdown-git-run-"));
+    const [second, same, third] = content.querySelectorAll(":scope > p");
+    assert.equal(run(content.querySelector("h1")), run(second));
+    assert.equal(run(same), undefined);
+    assert.notEqual(run(third), run(second));
+    assert.equal(run(content.querySelector(".skimdown-git-marker-deleted")), undefined);
+});
+
+test("Git-only refresh preserves reading position but changing the document resets it", async (t) => {
+    const renderer = await createRenderer();
+    t.after(() => renderer.close());
+    const scrolls = [];
+    renderer.window.scrollTo = (_x, y) => {
+        scrolls.push(y);
+        Object.defineProperty(renderer.window, "scrollY", { configurable: true, value: y });
+    };
+    await renderer.render("# Same\n");
+    Object.defineProperty(renderer.window, "scrollY", { configurable: true, value: 240 });
+    await renderer.render("# Same\n", { gitDiff: { hunks: [{ newStart: 0, newCount: 1, oldLines: [] }] } });
+    assert.equal(scrolls.at(-1), 240);
+    await renderer.render("# Other\n");
+    assert.equal(scrolls.at(-1), 0);
+    await renderer.render("# Other\n", { remoteContentId: "b".repeat(64) });
+    assert.equal(scrolls.at(-1), 0);
 });
 
 test("renderer scrolls to a selected ToC heading and reports it as active", async (t) => {

@@ -299,7 +299,9 @@
             return renderKatex(tokens[idx].content, false);
         };
         mdInstance.renderer.rules.math_block = function (tokens, idx) {
-            return renderKatex(tokens[idx].content, true);
+            var classes = tokens[idx].attrGet("class");
+            var rendered = renderKatex(tokens[idx].content, true);
+            return classes ? '<div class="' + escapeAttr(classes) + '">' + rendered + '</div>' : rendered;
         };
     }
 
@@ -357,6 +359,9 @@
             var info = token.info ? token.info.trim() : "";
             var lang = info.split(/\s+/)[0].toLowerCase();
             var rawCode = token.content || "";
+            var gitClasses = (token.attrGet("class") || "").split(/\s+/).filter(function (name) {
+                return name.indexOf("skimdown-git-") === 0;
+            }).join(" ");
 
             if (lang === "mermaid") {
                 // Emit a placeholder Mermaid block; we render it post-sanitize.
@@ -364,7 +369,7 @@
                 // that the outer `.skim-mermaid-wrap` can host an absolutely-
                 // positioned zoom-hint badge that stays visible regardless of
                 // the diagram's intrinsic width.
-                return '<div class="skim-mermaid-wrap">' +
+                return '<div class="skim-mermaid-wrap' + (gitClasses ? ' ' + gitClasses : '') + '">' +
                        '<div class="skim-mermaid-scroll">' +
                        '<pre class="mermaid" data-source="' + escapeAttr(rawCode) + '">' +
                        escapeHtml(rawCode) +
@@ -373,7 +378,8 @@
 
             if (lang === "math") {
                 // GitHub renders ```math fenced blocks as display KaTeX. Match that.
-                return '<div class="skim-math-block">' + renderKatex(rawCode, true) + '</div>';
+                return '<div class="skim-math-block' + (gitClasses ? ' ' + gitClasses : '') + '">' +
+                    renderKatex(rawCode, true) + '</div>';
             }
 
             var inner = defaultFence
@@ -1944,8 +1950,18 @@
         });
     }
 
-    function render(markdown, sourcePath, contentBaseUri, remoteContentId, remoteContentToken, theme, themeType, themeIsDark, themeVars) {
+    var lastRenderedMarkdown = null;
+    var lastRenderedSourcePath = null;
+    var lastRenderedRemoteId = null;
+
+    function render(markdown, sourcePath, contentBaseUri, remoteContentId, remoteContentToken, theme, themeType, themeIsDark, themeVars, gitDiff) {
         if (typeof markdown !== "string") markdown = "";
+        var scrollY = markdown === lastRenderedMarkdown && sourcePath === lastRenderedSourcePath
+            && remoteContentId === lastRenderedRemoteId
+            ? window.scrollY : 0;
+        lastRenderedMarkdown = markdown;
+        lastRenderedSourcePath = sourcePath;
+        lastRenderedRemoteId = remoteContentId;
         // If the user switches to another file while the zoom modal is open,
         // the clone in the modal now points at a diagram that's about to be
         // detached. Close the modal so we never leave a stale view on top.
@@ -1964,9 +1980,19 @@
 
         var parsedMarkdown = extractFrontMatter(markdown);
         var rendererInstance = ensureMarkdown();
+        var git = window.SkimGitDiff;
+        if (git) git.teardown(contentEl);
+        var gitPlan = null;
         var raw;
         try {
-            raw = rendererInstance.render(parsedMarkdown.markdown);
+            var hunks = git && git.normalize(gitDiff);
+            if (hunks) {
+                var gitRender = git.render(rendererInstance, markdown, parsedMarkdown, hunks);
+                raw = gitRender.html;
+                gitPlan = gitRender.plan;
+            } else {
+                raw = rendererInstance.render(parsedMarkdown.markdown);
+            }
         } catch (e) {
             raw = '<div class="skim-error">Markdown render failed: ' + escapeHtml(String(e)) + '</div>';
         }
@@ -1977,6 +2003,7 @@
         if (parsedMarkdown.frontMatter !== null && window.DOMPurify) {
             prependFrontMatter(contentEl, parsedMarkdown.frontMatter);
         }
+        if (gitPlan && window.DOMPurify) git.prepare(contentEl, gitPlan);
         postToHost({
             type: "remoteContent",
             documentId: currentRemoteContentId,
@@ -2017,13 +2044,14 @@
         applyGithubAlerts();
         convertBacktickMath();
         applyColorSwatches();
+        if (gitPlan && window.DOMPurify) git.finish(contentEl, gitPlan);
 
         // Mermaid renders AFTER sanitization (it injects SVG into the live DOM).
         // We pin securityLevel: "strict" and constrain inputs to limit the blast
         // radius even though the markdown is locally-opened content.
         renderMermaidBlocks();
 
-        try { window.scrollTo(0, 0); } catch (e) { /* test envs may not implement scrollTo */ }
+        try { window.scrollTo(0, scrollY); } catch (e) { /* test envs may not implement scrollTo */ }
         publishTableOfContents();
 
         // Re-apply current search if any.
@@ -2194,7 +2222,7 @@
                 // Skip color swatches (they have no text but a closest() check
                 // is harmless and future-proof).
                 if (node.parentNode && node.parentNode.closest) {
-                    if (node.parentNode.closest(".skim-mermaid-wrap, svg, .katex-mathml, .skim-color-swatch")) {
+                    if (node.parentNode.closest(".skim-mermaid-wrap, svg, .katex-mathml, .skim-color-swatch, .skimdown-git-marker")) {
                         return NodeFilter.FILTER_REJECT;
                     }
                 }
@@ -2455,7 +2483,8 @@
                             msg.theme,
                             msg.themeType,
                             msg.themeIsDark,
-                            msg.themeVars);
+                            msg.themeVars,
+                            msg.gitDiff);
                         break;
                     case "strings":
                         if (msg.strings && typeof msg.strings === "object") {

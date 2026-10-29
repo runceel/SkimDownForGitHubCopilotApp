@@ -32,6 +32,7 @@ import {
     updateSettings,
     updateSettingsWithPrevious,
     setExpanded,
+    settingsEvents,
 } from "./settings.mjs";
 import {
     loadRegistry,
@@ -60,6 +61,7 @@ import {
     validateDiagnostic,
 } from "./diagnostics.mjs";
 import { createWatcher } from "./watcher.mjs";
+import { createGitTracker } from "./gitChanges.mjs";
 import { isMarkdownFile } from "./scanner.mjs";
 import { fetchRemoteResource, RemoteContentError } from "./remoteContent.mjs";
 
@@ -95,7 +97,7 @@ const CONTENT_TYPES = new Map(Object.entries({
 }));
 
 const SHELL_ASSETS = new Set(["shell.html", "shell.css", "shell.js"]);
-const RENDERER_ASSETS = new Set(["renderer.html", "bridge.js", "renderer.js", "skimdown.css"]);
+const RENDERER_ASSETS = new Set(["renderer.html", "bridge.js", "renderer.js", "skimdown.css", "gitDiff.js", "gitDiff.css"]);
 const SSE_KEEPALIVE_MS = 25000;
 const MAX_REMOTE_GRANTS = 100;
 const CAPABILITY_BYTES = 32;
@@ -175,6 +177,7 @@ export async function createInstance(ctx) {
         doc: null,
         historyMemoryGeneration: 0,
         notice: null,
+        git: { statuses: {}, error: null },
     };
 
     const sseClients = new Set();
@@ -195,8 +198,25 @@ export async function createInstance(ctx) {
     approveRoot(sessionArtifactsDir(ctx.sessionId));
 
     const watcher = createWatcher(() => {
-        void handleFilesystemChange();
+        void handleFilesystemChange().catch(() => ctx.log?.("skimdown filesystem refresh failed"));
     });
+    const gitTracker = createGitTracker(
+        () => { void handleFilesystemChange().catch(() => ctx.log?.("skimdown Git refresh failed")); },
+        (message) => ctx.log?.(message),
+    );
+    let gitGeneration = 0;
+    let gitWork = Promise.resolve();
+    let gitVisible = false;
+    const onSettingsChanged = (settings) => {
+        if (settings.showGitChanges === gitVisible) return;
+        gitVisible = settings.showGitChanges;
+        gitWork = refreshGit().then(async () => {
+            broadcast("settings", settings);
+            broadcast("state", await buildState());
+            if (state.doc) broadcast("doc", publicDoc());
+        }).catch(() => ctx.log?.("skimdown Git settings refresh failed"));
+    };
+    settingsEvents.on("changed", onSettingsChanged);
 
     // Registry changes are announced synchronously, so the follow-up work is
     // tracked to let `dispose` wait for it instead of racing teardown.
@@ -287,7 +307,7 @@ export async function createInstance(ctx) {
         return token;
     }
 
-    async function refreshListing({ push } = {}) {
+    async function refreshListing({ push, skipGit = false } = {}) {
         state.listing = await listSource(
             { sessionId: ctx.sessionId, workspacePath: state.workspacePath },
             state.source,
@@ -295,6 +315,7 @@ export async function createInstance(ctx) {
         );
         approveListing(state.listing);
         updateWatchTargets();
+        if (!skipGit) await refreshGit();
         if (push) broadcast("state", await buildState());
         return state.listing;
     }
@@ -336,7 +357,26 @@ export async function createInstance(ctx) {
             notice: state.notice,
             contentBaseUri,
             rendererBaseUri,
+            git: state.git,
         };
+    }
+
+    async function refreshGit() {
+        const generation = ++gitGeneration;
+        const doc = state.doc;
+        const listing = state.listing;
+        const settings = await loadSettings({ fresh: true });
+        if (generation !== gitGeneration || doc !== state.doc || listing !== state.listing) return;
+        gitVisible = settings.showGitChanges;
+        const listingRoot = listing?.root;
+        const root = settings.showGitChanges
+            ? listingRoot || (doc?.kind === "file" ? path.dirname(doc.path) : null)
+            : null;
+        const files = listingRoot ? (listing.recent || []).map((file) => file.path) : [];
+        const result = await gitTracker.refresh(root, files, doc?.kind === "file" ? doc : null);
+        if (generation !== gitGeneration || doc !== state.doc || listing !== state.listing) return;
+        state.git = { statuses: listingRoot ? result.statuses : {}, error: result.error };
+        if (doc) doc.gitDiff = result.gitDiff;
     }
 
     /** Entries of the document set, as the sidebar currently shows them. */
@@ -524,7 +564,7 @@ export async function createInstance(ctx) {
     }
 
     async function selectFile(absPath, { push = true } = {}) {
-        return withStateLock(async () => {
+        const selected = await withStateLock(async () => {
             const resolved = canonicalPath(absPath);
             requireApprovedPath(resolved);
             const file = await readMarkdownFile(resolved);
@@ -552,16 +592,18 @@ export async function createInstance(ctx) {
             updateWatchTargets();
             await rememberSelection(ctx.sessionId, { kind: "file", path: resolved }, state.root);
             await captureHistoryMemoryGeneration();
-            if (push) {
-                broadcast("doc", publicDoc());
-                broadcast("state", await buildState());
-            }
             return state.doc;
         });
+        await refreshGit();
+        if (push && state.doc === selected) {
+            broadcast("doc", publicDoc());
+            broadcast("state", await buildState());
+        }
+        return selected;
     }
 
     async function selectInline(id, { push = true } = {}) {
-        return withStateLock(async () => {
+        const selected = await withStateLock(async () => {
             const doc = await getInlineDoc(ctx.sessionId, id);
             if (!doc) {
                 const error = new Error(`Inline document not found: ${id}`);
@@ -585,12 +627,14 @@ export async function createInstance(ctx) {
             });
             await rememberSelection(ctx.sessionId, { kind: "inline", id: doc.id }, state.root);
             await captureHistoryMemoryGeneration();
-            if (push) {
-                broadcast("doc", publicDoc());
-                broadcast("state", await buildState());
-            }
             return state.doc;
         });
+        await refreshGit();
+        if (push && state.doc === selected) {
+            broadcast("doc", publicDoc());
+            broadcast("state", await buildState());
+        }
+        return selected;
     }
 
     /** Pick a sensible first document when a source is opened with no selection. */
@@ -691,7 +735,8 @@ export async function createInstance(ctx) {
     }
 
     async function handleFilesystemChange() {
-        await refreshListing();
+        const previousDiff = JSON.stringify(state.doc?.gitDiff);
+        await refreshListing({ skipGit: true });
         let docChanged = false;
 
         if (state.selection?.kind === "file") {
@@ -711,11 +756,13 @@ export async function createInstance(ctx) {
             }
         }
 
+        await refreshGit();
         broadcast("state", await buildState());
-        if (docChanged) {
+        if (docChanged || previousDiff !== JSON.stringify(state.doc?.gitDiff)) {
             if (state.doc) broadcast("doc", publicDoc());
             else broadcast("empty", {});
         }
+        return state.listing;
     }
 
     // ---------- SSE ----------
@@ -974,7 +1021,7 @@ export async function createInstance(ctx) {
                 return sendJson(res, 200, { ok: true, ...result });
             }
             case "/api/refresh": {
-                await refreshListing({ push: true });
+                await handleFilesystemChange();
                 return sendJson(res, 200, { ok: true, count: state.listing?.count ?? 0 });
             }
             case "/api/set/step": {
@@ -989,6 +1036,7 @@ export async function createInstance(ctx) {
                     ? await updateSessionPrivacySettings(ctx.sessionId, body || {})
                     : (await updateSettingsWithPrevious(body || {})).settings;
                 broadcast("settings", settings);
+                await gitWork;
                 return sendJson(res, 200, { ok: true, settings });
             }
             case "/api/session-history": {
@@ -1220,16 +1268,23 @@ export async function createInstance(ctx) {
     // ---------- lifecycle ----------
 
     const historyReconcileTimer = setInterval(() => {
-        void reconcileHistoryClear({ push: true }).catch((error) => {
+        void (async () => {
+            await reconcileHistoryClear({ push: true });
+            onSettingsChanged(await loadSettings({ fresh: true }));
+        })().catch((error) => {
             ctx.log?.(`skimdown history reconciliation failed: ${error?.message || error}`);
         });
     }, 5000);
     historyReconcileTimer.unref?.();
 
     async function dispose() {
+        settingsEvents.off("changed", onSettingsChanged);
         registryEvents.off("changed", onRegistryChanged);
         clearInterval(historyReconcileTimer);
         watcher.dispose();
+        gitGeneration++;
+        await gitTracker.dispose();
+        await gitWork;
         // Registry work touches session state on disk, so it has to finish
         // before the caller is free to tear that state down.
         await registryWork;
@@ -1288,6 +1343,7 @@ export async function createInstance(ctx) {
         selectInline,
         autoSelect,
         refreshListing,
+        refresh: handleFilesystemChange,
         buildState,
         broadcast,
         dispose,

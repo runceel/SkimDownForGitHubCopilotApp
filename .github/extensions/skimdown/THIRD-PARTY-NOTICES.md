@@ -13,6 +13,13 @@ derived from SkimDown for Windows, which is authored by the same author as this
 repository. This repository may carry narrowly scoped security hardening in
 `web/renderer.js` until the corresponding upstream change is available.
 
+The Git block-decoration helpers and styles (`web/gitDiff.js`, `web/gitDiff.css`)
+are adapted from [07JP27/SkimDown #59](https://github.com/07JP27/SkimDown/pull/59),
+commit `9da614429132d4c06ea788246eda9df3466b878b` (v0.16.0).
+The original project is distributed under GPL-3.0. This port uses the original
+author's separate permission, which the repository owner confirmed also covers
+this feature; it does not claim that the original project is MIT-licensed.
+
 | Component | Version | License | Project |
 | --- | --- | --- | --- |
 | markdown-it | 14.1.0 | MIT | <https://github.com/markdown-it/markdown-it> |

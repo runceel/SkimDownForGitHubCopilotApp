@@ -6,6 +6,10 @@
  */
 
 import { settingsFile, readJson, writeJsonAtomic, withStateLock } from "./paths.mjs";
+import { EventEmitter } from "node:events";
+
+export const settingsEvents = new EventEmitter();
+settingsEvents.setMaxListeners(0);
 
 const CONTENT_WIDTHS = ["760px", "960px", "1200px", "none"];
 const SESSION_RETENTION_DAYS = [1, 7, 30];
@@ -13,6 +17,7 @@ const SESSION_RETENTION_DAYS = [1, 7, 30];
 const DEFAULTS = {
     sidebarVisible: true,
     tocVisible: true,
+    showGitChanges: false,
     sidebarWidth: 260,
     sidebarPosition: "left", // "left" | "right"
     viewMode: "tree", // "tree" | "recent"
@@ -89,9 +94,11 @@ async function mutateSettings(mutator) {
     return withStateLock(async () => {
         const stored = await readJson(settingsFile(), {});
         const current = normalize({ ...DEFAULTS, ...stored });
-        cache = normalize(mutator(current));
-        await writeJsonAtomic(settingsFile(), cache);
-        return { previous: current, settings: cache };
+        const next = normalize(mutator(current));
+        await writeJsonAtomic(settingsFile(), next);
+        cache = next;
+        settingsEvents.emit("changed", next, current);
+        return { previous: current, settings: next };
     });
 }
 
@@ -114,6 +121,7 @@ function normalize(value) {
     const out = { ...DEFAULTS, ...value };
     out.sidebarVisible = out.sidebarVisible !== false;
     out.tocVisible = out.tocVisible !== false;
+    out.showGitChanges = out.showGitChanges === true;
     out.sidebarWidth = clamp(toNumber(out.sidebarWidth, DEFAULTS.sidebarWidth), 160, 520);
     out.sidebarPosition = out.sidebarPosition === "right" ? "right" : "left";
     out.viewMode = out.viewMode === "recent" ? "recent" : "tree";
